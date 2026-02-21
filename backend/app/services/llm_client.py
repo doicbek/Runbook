@@ -220,6 +220,14 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
         return await _openai_compatible_completion(config, api_key, messages, **kwargs)
 
 
+# Models that require max_completion_tokens instead of max_tokens
+_MAX_COMPLETION_TOKENS_MODELS = {
+    "gpt-5", "gpt-5-mini", "gpt-5-nano",
+    "o1", "o1-mini", "o1-preview",
+    "o3", "o3-mini", "o4-mini",
+}
+
+
 async def _openai_compatible_completion(
     config: ModelConfig, api_key: str, messages: list[dict], **kwargs
 ) -> str:
@@ -229,6 +237,13 @@ async def _openai_compatible_completion(
     client_kwargs: dict = {"api_key": api_key}
     if config.base_url:
         client_kwargs["base_url"] = config.base_url
+
+    # Newer OpenAI models (gpt-5, o-series) use max_completion_tokens
+    if config.provider == "openai" and config.model_id in _MAX_COMPLETION_TOKENS_MODELS:
+        if "max_tokens" in kwargs:
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+        # These models also don't support temperature
+        kwargs.pop("temperature", None)
 
     client = AsyncOpenAI(**client_kwargs)
     response = await client.chat.completions.create(
