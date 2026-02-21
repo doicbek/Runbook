@@ -11,7 +11,14 @@ const statusColors: Record<string, string> = {
   error: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
 
-const REAL_BUILTINS = new Set(["arxiv_search", "code_execution"]);
+const REAL_BUILTINS = new Set([
+  "arxiv_search",
+  "code_execution",
+  "data_retrieval",
+  "spreadsheet",
+  "report",
+  "general",
+]);
 
 function implBadge(agent: AgentDefinition) {
   if (!agent.is_builtin && agent.code) return { label: "Custom code", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" };

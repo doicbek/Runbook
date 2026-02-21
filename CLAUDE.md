@@ -524,3 +524,55 @@ Use **MCP** as the standard way for agents to access tools and context. MCP give
 The user is always in the loop.
 
 Agents propose. The system executes. The user can intervene at any moment.
+
+---
+
+## Current Implementation Status
+
+> This section documents what has been built. Update it as features are added.
+
+### Completed
+
+**Core workflow (Steps 1–4 complete)**
+- Action + Task + TaskOutput + Artifact + Log models (SQLite/aiosqlite)
+- LLM planner: OpenAI structured output (`response_format=PlannerOutput`), retry + fallback
+- DAG executor: `asyncio.gather` for parallel tasks, BFS invalidation on edit, restart from any task
+- SSE stream: snapshot on connect + live `task.started / completed / failed / log.append` events
+- Task editor: edit prompt, agent type, model override per task
+- Artifact system: files stored on disk, served via `/artifacts/:id/content`
+
+**Agent Studio**
+- `agent_definitions` DB table — stores builtin + custom agent definitions
+- Custom agent creation: name → slug, description, tool selection, AI-generate code (scaffolding service), review + save
+- Dynamic agent loading at runtime via `exec()` into controlled namespace
+- Builtin agents can be overridden by saving code to their DB record
+- AI-modify panel: describe a change in plain English → LLM rewrites code → user reviews
+- Endpoints: CRUD + `/scaffold` + `/:id/modify`
+
+**6 Real built-in agents** (all `is_builtin=True`, seeded at startup)
+- `arxiv_search`: arXiv API + ChromaDB semantic search + LLM synthesis with citations
+- `code_execution`: LLM-generated Python → sandboxed subprocess → plots/files as artifacts
+- `data_retrieval`: LLM plans queries → DuckDuckGo → fetch pages → HTML tables/CSV/JSON/Excel → LLM synthesis
+- `spreadsheet`: LLM-generated openpyxl code → real `.xlsx` with formatting + Summary sheet → artifact download
+- `report`: extract findings (parallel) → outline → write sections (parallel) → assemble with images + LaTeX
+- `general`: chain-of-thought → classify → plan steps → execute steps → synthesise
+
+**Planner Config dashboard** (`/planner`)
+- `planner_config` DB singleton — system_prompt, model, max_tasks, max_retries
+- API key status check (per provider)
+- AI-modify for system prompt
+- Test sandbox: preview planned tasks for any prompt without creating an action
+- Custom agent context auto-injected into planner system prompt
+
+**Multi-model LLM registry**
+- OpenAI: `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o3-mini`, `o4-mini`, `gpt-4o`, `gpt-4o-mini`
+- Anthropic: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-sonnet-4-5`
+- Google: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`
+- DeepSeek: `deepseek-chat`
+- Unified `chat_completion()` interface; Anthropic uses separate SDK, others via OpenAI-compatible client
+- Per-agent-type defaults; graceful fallback when API key missing
+
+### Known Deviations from Spec
+- Parallel execution uses `asyncio.gather` in a single process rather than a distributed worker queue (Celery/Redis). Acceptable for current scale.
+- No authentication, billing, or multi-user support (by design for MVP).
+- MCP integration is not yet implemented — agents use direct library calls instead.
