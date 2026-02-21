@@ -17,6 +17,24 @@ class ModelConfig:
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
     # ── OpenAI ────────────────────────────────────────────────────────────────
+    "openai/gpt-5": ModelConfig(
+        provider="openai",
+        model_id="gpt-5",
+        display_name="GPT-5",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/gpt-5-mini": ModelConfig(
+        provider="openai",
+        model_id="gpt-5-mini",
+        display_name="GPT-5 Mini",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/gpt-5-nano": ModelConfig(
+        provider="openai",
+        model_id="gpt-5-nano",
+        display_name="GPT-5 Nano",
+        api_key_setting="OPENAI_API_KEY",
+    ),
     "openai/gpt-4.1": ModelConfig(
         provider="openai",
         model_id="gpt-4.1",
@@ -131,14 +149,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 
 DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
     "arxiv_search": "anthropic/claude-sonnet-4-6",
-    "code_execution": "openai/gpt-4.1",
+    "code_execution": "openai/gpt-5",
     "report": "anthropic/claude-sonnet-4-6",
-    "data_retrieval": "openai/gpt-4.1-mini",
-    "spreadsheet": "openai/gpt-4.1",
-    "general": "openai/gpt-4.1",
+    "data_retrieval": "openai/gpt-5-mini",
+    "spreadsheet": "openai/gpt-5",
+    "general": "openai/gpt-5",
 }
 
-FALLBACK_MODEL = "openai/gpt-4.1"
+FALLBACK_MODEL = "openai/gpt-5"
 
 
 def _get_api_key(setting_name: str) -> str:
