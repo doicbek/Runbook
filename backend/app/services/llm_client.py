@@ -149,14 +149,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 
 DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
     "arxiv_search": "anthropic/claude-sonnet-4-6",
-    "code_execution": "openai/gpt-5",
+    "code_execution": "openai/gpt-4.1",      # gpt-5 refuses code gen; gpt-4.1 is SOTA for code
     "report": "anthropic/claude-sonnet-4-6",
-    "data_retrieval": "openai/gpt-5-mini",
-    "spreadsheet": "openai/gpt-5",
-    "general": "openai/gpt-5",
+    "data_retrieval": "openai/gpt-4.1-mini",
+    "spreadsheet": "openai/gpt-4.1",
+    "general": "openai/gpt-5",               # gpt-5 fine for reasoning; not code gen
 }
 
-FALLBACK_MODEL = "openai/gpt-5"
+FALLBACK_MODEL = "openai/gpt-4.1"
 
 
 def _get_api_key(setting_name: str) -> str:

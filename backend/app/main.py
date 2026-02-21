@@ -18,6 +18,17 @@ async def lifespan(app: FastAPI):
         await seed_builtin_agents(db)
         from app.services.planner_config_seed import seed_planner_config
         await seed_planner_config(db)
+        # Reset any tasks/actions left in 'running' state from a prior crashed process
+        from sqlalchemy import update
+        from app.models.task import Task
+        from app.models.action import Action
+        await db.execute(
+            update(Task).where(Task.status == "running").values(status="failed")
+        )
+        await db.execute(
+            update(Action).where(Action.status == "running").values(status="failed")
+        )
+        await db.commit()
     # Ensure artifacts directory exists
     artifacts_dir = Path(__file__).parent.parent / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)

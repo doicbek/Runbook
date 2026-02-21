@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import re
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -15,6 +16,62 @@ logger = logging.getLogger(__name__)
 MAX_CONTENT_PER_PAGE = 8_000
 MAX_PAGES = 5
 FETCH_TIMEOUT = 15
+
+# ── Well-known free API shortcuts ─────────────────────────────────────────────
+
+_CITY_COORDS = {
+    "san jose": (37.3382, -121.8863),
+    "san francisco": (37.7749, -122.4194),
+    "los angeles": (34.0522, -118.2437),
+    "new york": (40.7128, -74.0060),
+    "chicago": (41.8781, -87.6298),
+    "seattle": (47.6062, -122.3321),
+    "austin": (30.2672, -97.7431),
+    "boston": (42.3601, -71.0589),
+    "denver": (39.7392, -104.9903),
+    "london": (51.5074, -0.1278),
+    "paris": (48.8566, 2.3522),
+    "tokyo": (35.6895, 139.6917),
+}
+
+
+def _build_open_meteo_url(prompt: str) -> str | None:
+    """Build an Open-Meteo archive URL if the prompt looks like a weather data request."""
+    low = prompt.lower()
+    if not any(kw in low for kw in ["temperature", "weather", "climate", "temp", "rainfall", "precipitation"]):
+        return None
+
+    # Detect city
+    coords = None
+    city_name = None
+    for city, (lat, lon) in _CITY_COORDS.items():
+        if city in low:
+            coords = (lat, lon)
+            city_name = city
+            break
+    if not coords:
+        return None
+
+    # Detect year range
+    years = re.findall(r"\b(20\d{2})\b", prompt)
+    if years:
+        start = f"{years[0]}-01-01"
+        end = f"{years[-1]}-12-31"
+    else:
+        start, end = "2023-01-01", "2023-12-31"
+
+    lat, lon = coords
+    params = urllib.parse.urlencode({
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start,
+        "end_date": end,
+        "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean",
+        "timezone": "auto",
+    })
+    url = f"https://archive-api.open-meteo.com/v1/archive?{params}"
+    logger.info(f"Auto-constructed Open-Meteo URL for {city_name}: {url}")
+    return url
 
 
 class DataRetrievalAgent(BaseAgent):
@@ -45,42 +102,61 @@ class DataRetrievalAgent(BaseAgent):
         await log("info", f"Data Retrieval Agent | model={resolved_model}")
         await log("info", f"Task: {prompt[:140]}")
 
-        # ── 1. Plan ──────────────────────────────────────────────────────────
+        # ── 1. Auto-detect well-known APIs before any LLM planning ────────────
+        auto_url = _build_open_meteo_url(prompt)
+
+        # ── 2. Plan (skip if auto-URL gives us enough) ────────────────────────
         await log("info", "Analysing data requirements...")
         plan = await self._plan(resolved_model, prompt, dependency_outputs)
         await log("info", f"Goal: {plan.get('goal', prompt)}")
         for q in plan.get("queries", []):
             await log("info", f"  Query: {q}")
 
-        # ── 2. Web search ─────────────────────────────────────────────────────
-        all_results: list[dict] = []
-        for query in plan.get("queries", [])[:4]:
-            await log("info", f"Searching: {query}")
-            hits = await self._search(query)
-            await log("info", f"  → {len(hits)} results")
-            all_results.extend(hits)
+        # Merge auto_url into direct_urls if not already present
+        direct_urls = plan.get("direct_urls", [])
+        if auto_url and auto_url not in direct_urls:
+            direct_urls = [auto_url] + direct_urls
+            await log("info", f"Auto-detected API URL: {auto_url[:90]}")
 
-        # Deduplicate by URL
-        seen: set[str] = set()
-        unique: list[dict] = []
-        for r in all_results:
-            if r["url"] not in seen:
-                seen.add(r["url"])
-                unique.append(r)
-        await log("info", f"Unique sources: {len(unique)}")
-
-        # ── 3. Fetch & extract ────────────────────────────────────────────────
+        # ── 3. Direct URL fetches ─────────────────────────────────────────────
         fetched: list[dict] = []
-        for hit in unique[:MAX_PAGES]:
-            await log("info", f"Fetching: {hit['url'][:90]}")
-            content = await self._fetch(hit["url"])
+        for url in direct_urls[:3]:
+            await log("info", f"Direct fetch: {url[:90]}")
+            content = await self._fetch(url)
             if content:
-                content["title"] = hit.get("title", "")
-                content["snippet"] = hit.get("snippet", "")
+                content["title"] = "Direct API response"
                 fetched.append(content)
                 n_tables = len(content.get("tables", []))
                 n_chars = len(content.get("text", ""))
                 await log("info", f"  → {n_chars} chars, {n_tables} table(s)")
+
+        # ── 3. Web search (only if direct fetches didn't provide enough) ─────
+        if len(fetched) < 2:
+            all_results: list[dict] = []
+            for query in plan.get("queries", [])[:4]:
+                await log("info", f"Searching: {query}")
+                hits = await self._search(query)
+                await log("info", f"  → {len(hits)} results")
+                all_results.extend(hits)
+
+            seen: set[str] = set()
+            unique: list[dict] = []
+            for r in all_results:
+                if r["url"] not in seen:
+                    seen.add(r["url"])
+                    unique.append(r)
+            await log("info", f"Unique sources: {len(unique)}")
+
+            for hit in unique[:MAX_PAGES]:
+                await log("info", f"Fetching: {hit['url'][:90]}")
+                content = await self._fetch(hit["url"])
+                if content:
+                    content["title"] = hit.get("title", "")
+                    content["snippet"] = hit.get("snippet", "")
+                    fetched.append(content)
+                    n_tables = len(content.get("tables", []))
+                    n_chars = len(content.get("text", ""))
+                    await log("info", f"  → {n_chars} chars, {n_tables} table(s)")
 
         # ── 4. Read file URLs from upstream outputs ───────────────────────────
         for url in self._file_urls_from_deps(dependency_outputs):
@@ -117,8 +193,15 @@ class DataRetrievalAgent(BaseAgent):
         system = (
             "You are a data retrieval planner. Given a task prompt, output a JSON object with:\n"
             "- goal: one sentence — what data needs to be retrieved\n"
-            "- queries: list of 2–4 specific web search queries (be precise; include years, units, sources)\n"
-            "- data_types: expected formats e.g. [\"table\", \"csv\", \"json\", \"text\"]\n"
+            "- queries: list of 2–4 SHORT web search queries a human would type into Google.\n"
+            "  CRITICAL: Do NOT restate the task as a query. Write terse keyword-style queries.\n"
+            "  Good examples: [\"San Jose temperature 2023 daily CSV\", \"open-meteo historical weather API\"]\n"
+            "  Bad examples: [\"Fetch daily temperature data for San Jose from the Open-Meteo API for the year 2023\"]\n"
+            "- direct_urls: list of direct API or data URLs to fetch (if the task names a specific API/dataset).\n"
+            "  For weather data use Open-Meteo archive API (free, no key):\n"
+            "  https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&timezone=auto\n"
+            "  San Jose CA: latitude=37.3382, longitude=-121.8863\n"
+            "- data_types: expected formats e.g. [\"json\", \"csv\", \"table\"]\n"
             "- key_metrics: specific values or columns to extract\n"
             "Output ONLY valid JSON, no markdown fences."
         )
@@ -131,10 +214,21 @@ class DataRetrievalAgent(BaseAgent):
             ], max_tokens=600)
             raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
             raw = re.sub(r"\s*```$", "", raw.strip())
-            return json.loads(raw)
+            plan = json.loads(raw)
+            # Ensure direct_urls key exists
+            plan.setdefault("direct_urls", [])
+            return plan
         except Exception as e:
-            logger.warning(f"Plan failed: {e} — using prompt as query")
-            return {"goal": prompt, "queries": [prompt], "data_types": ["text"], "key_metrics": []}
+            logger.warning(f"Plan failed: {e} — using fallback queries")
+            # Fallback: generate sensible short queries from the prompt keywords
+            words = [w for w in prompt.split() if len(w) > 3][:6]
+            return {
+                "goal": prompt,
+                "queries": [" ".join(words[:4]), " ".join(words[:4]) + " data CSV"],
+                "direct_urls": [],
+                "data_types": ["text"],
+                "key_metrics": [],
+            }
 
     # ── Search ────────────────────────────────────────────────────────────────
 

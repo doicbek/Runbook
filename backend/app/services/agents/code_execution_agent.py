@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -32,6 +33,14 @@ class CodeExecutionAgent(BaseAgent):
             await log_callback("info", "Generating Python code from task prompt...")
 
         code = await self._generate_code(resolved_model, prompt, dependency_outputs)
+
+        # If the model returned empty code, retry with an explicit data-fetching fallback
+        if not code.strip():
+            if log_callback:
+                await log_callback("warn", "Empty code returned — retrying with explicit fetch instruction")
+            code = await self._generate_code(
+                resolved_model, prompt, dependency_outputs, force_fetch=True
+            )
 
         if log_callback:
             await log_callback("info", f"Generated code ({len(code.splitlines())} lines)")
@@ -129,13 +138,30 @@ class CodeExecutionAgent(BaseAgent):
         model: str,
         prompt: str,
         dependency_outputs: dict[str, Any],
+        force_fetch: bool = False,
     ) -> str:
         """Use LLM to generate Python code for the task."""
         dep_context = ""
         if dependency_outputs:
             for dep_id, output in dependency_outputs.items():
-                if output:
-                    dep_context += f"\n\nUpstream task output:\n{str(output)[:1500]}"
+                out_str = str(output) if output else ""
+                # Skip dependency outputs that are clearly failures/empty
+                if out_str and "No Results" not in out_str and "No content retrieved" not in out_str:
+                    dep_context += f"\n\nUpstream task output:\n{out_str[:1500]}"
+
+        force_fetch_instruction = ""
+        if force_fetch or not dep_context:
+            force_fetch_instruction = (
+                "\n\nCRITICAL: No upstream data was provided. You MUST write code that fetches "
+                "the required data from a public API using urllib.request. Do NOT return empty code. "
+                "For temperature/weather tasks, use the Open-Meteo archive API:\n"
+                "  import urllib.request, json, urllib.parse\n"
+                "  params = urllib.parse.urlencode({'latitude': 37.3382, 'longitude': -121.8863,\n"
+                "    'start_date': '2023-01-01', 'end_date': '2023-12-31',\n"
+                "    'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean', 'timezone': 'auto'})\n"
+                "  url = f'https://archive-api.open-meteo.com/v1/archive?{params}'\n"
+                "  data = json.loads(urllib.request.urlopen(url).read())\n"
+            )
 
         code = await chat_completion(
             model,
@@ -145,34 +171,36 @@ class CodeExecutionAgent(BaseAgent):
                     "content": (
                         "You are a Python code generator. Write clean, executable Python code "
                         "for the given task.\n\n"
-                        "Available libraries: numpy, scipy, matplotlib, pandas, math, statistics.\n\n"
+                        "Available libraries: numpy, scipy, matplotlib, pandas, math, statistics, "
+                        "urllib.request, urllib.parse, json, datetime, csv, io.\n\n"
+                        "IMPORTANT — Data fetching:\n"
+                        "- You CAN and SHOULD fetch data from public APIs using urllib.request when the task needs real data.\n"
+                        "- If upstream task output is empty, missing, or says 'No Results', fetch the data yourself.\n"
+                        "- Free weather API (no key needed): https://archive-api.open-meteo.com/v1/archive\n"
+                        "  Params: latitude, longitude, start_date (YYYY-MM-DD), end_date, daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean, timezone=auto\n"
+                        "  San Jose CA: latitude=37.3382, longitude=-121.8863\n"
+                        "  Example: import urllib.request, json; url='https://archive-api.open-meteo.com/v1/archive?latitude=37.3382&longitude=-121.8863&start_date=2023-01-01&end_date=2023-12-31&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&timezone=auto'; data=json.loads(urllib.request.urlopen(url).read())\n\n"
                         "Rules:\n"
-                        "- Output ONLY the Python code, no markdown fences, no explanations\n"
-                        "- Always use plt.show() to display plots (it will be intercepted and saved)\n"
+                        "- Output ONLY the Python code — no markdown fences, no explanations, no comments about what you're doing\n"
+                        "- Always use plt.show() to display plots (it will be intercepted and saved as a file)\n"
                         "- Print key results to stdout\n"
                         "- Use descriptive plot titles, axis labels, and legends\n"
-                        "- If data is provided in the upstream output, parse it from there\n"
-                        "- If the task needs external data, generate realistic synthetic data\n"
+                        "- If structured data is provided in upstream output, parse it from there first\n"
+                        "- If upstream data is empty/missing, fetch from a public API — do NOT generate fake data for real-world tasks\n"
                         "- Use LaTeX in matplotlib labels where appropriate (e.g., r'$\\alpha$')\n"
-                        "- Handle errors gracefully"
+                        "- Handle errors gracefully with try/except"
                     ),
                 },
-                {"role": "user", "content": f"Task: {prompt}{dep_context}"},
+                {"role": "user", "content": f"Task: {prompt}{dep_context}{force_fetch_instruction}"},
             ],
             max_tokens=2000,
             temperature=0.2,
         )
-        # Strip markdown fences if the LLM wraps them anyway
+        # Strip markdown fences robustly
         code = code.strip()
-        if code.startswith("```"):
-            lines = code.split("\n")
-            # Remove first and last lines if they're fences
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            code = "\n".join(lines)
-        return code
+        code = re.sub(r"^```(?:python|py)?\s*\n?", "", code)
+        code = re.sub(r"\n?```\s*$", "", code)
+        return code.strip()
 
     def _build_summary(
         self,
