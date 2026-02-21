@@ -14,8 +14,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Actions",
-  description: "Agentic workflow orchestration",
+  title: {
+    default: "Runbook",
+    template: "%s · Runbook",
+  },
+  description: "Agentic workflow orchestration platform",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

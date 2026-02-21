@@ -27,7 +27,7 @@ export function WorkspaceHeader({ action }: { action: Action }) {
       <div className="max-w-6xl mx-auto px-4 py-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
           <Link href="/" className="hover:text-foreground transition-colors">
-            Actions
+            Runbook
           </Link>
           <span>/</span>
           <span className="text-foreground">{action.title}</span>
