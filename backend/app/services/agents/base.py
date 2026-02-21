@@ -10,6 +10,8 @@ class BaseAgent(ABC):
         prompt: str,
         dependency_outputs: dict[str, Any],
         log_callback: Any = None,
+        *,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Execute the agent's task and return output.
 
@@ -18,6 +20,7 @@ class BaseAgent(ABC):
             prompt: The task prompt
             dependency_outputs: Outputs from dependency tasks {task_id: output}
             log_callback: Async callable(level, message) for streaming logs
+            model: LLM model to use (e.g. "openai/gpt-4o")
 
         Returns:
             dict with at least "summary" key

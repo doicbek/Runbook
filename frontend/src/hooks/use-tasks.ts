@@ -30,6 +30,8 @@ export function useUpdateTask() {
       actionId: string;
       taskId: string;
       prompt?: string;
+      model?: string | null;
+      agent_type?: string;
       dependencies?: string[];
     }) => updateTask(actionId, taskId, body),
     onSuccess: (data) => {

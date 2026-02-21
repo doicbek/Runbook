@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useActionStore } from "@/stores/action-store";
@@ -10,6 +13,14 @@ import { getArtifactUrl } from "@/lib/api/tasks";
 import type { Artifact, CodeExecutionState, Task } from "@/types";
 import { TaskCardEditor } from "./task-card-editor";
 import { TaskLogsDrawer } from "./task-logs-drawer";
+
+const remarkPlugins = [remarkMath];
+const rehypePlugins = [rehypeKatex];
+
+const markdownComponents = {
+  img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) =>
+    src ? <img src={src} alt={alt || ""} {...props} /> : null,
+};
 
 const statusConfig: Record<
   string,
@@ -47,6 +58,7 @@ const agentTypeConfig: Record<string, { label: string; icon: string }> = {
   code_execution: { label: "Code", icon: "{ }" },
   report: { label: "Report", icon: "DOC" },
   general: { label: "General", icon: "GEN" },
+  arxiv_search: { label: "arXiv", icon: "arX" },
 };
 
 function hasCodeBlocks(text: string | null | undefined): boolean {
@@ -140,6 +152,11 @@ export function TaskCard({
             <span className="text-[11px] text-muted-foreground">
               {agentConfig.label}
             </span>
+            {task.model && (
+              <span className="text-[9px] font-mono text-muted-foreground/70 bg-muted/40 border border-border/50 px-1.5 py-0.5 rounded">
+                {task.model.split("/").pop()}
+              </span>
+            )}
           </div>
           <Badge
             variant="outline"
@@ -214,7 +231,7 @@ export function TaskCard({
                 >
                   <div className="output-preview max-h-[60px] overflow-hidden">
                     <div className="prose prose-sm dark:prose-invert max-w-none text-[12px] leading-relaxed prose-headings:text-[13px] prose-headings:font-semibold prose-headings:mb-1 prose-p:mb-0.5 prose-table:text-[10px] prose-th:px-1.5 prose-th:py-0.5 prose-td:px-1.5 prose-td:py-0.5 prose-li:text-[11px] prose-li:my-0">
-                      <ReactMarkdown>{outputSummary.slice(0, 200)}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={markdownComponents}>{outputSummary.slice(0, 200)}</ReactMarkdown>
                     </div>
                   </div>
                 </button>
@@ -223,7 +240,7 @@ export function TaskCard({
               {/* Expanded full output */}
               {outputExpanded && (
                 <article className="output-prose prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-h1:text-lg prose-h1:mb-2 prose-h1:pb-1.5 prose-h1:border-b prose-h1:border-border/50 prose-h2:text-base prose-h2:mt-4 prose-h2:mb-1.5 prose-h3:text-sm prose-h3:mt-3 prose-p:text-[13px] prose-p:leading-relaxed prose-table:text-[12px] prose-table:border prose-table:border-border prose-table:rounded-md prose-table:overflow-hidden prose-th:px-3 prose-th:py-1.5 prose-th:text-left prose-th:font-semibold prose-th:text-[11px] prose-th:uppercase prose-th:tracking-wider prose-th:bg-muted/50 prose-th:border prose-th:border-border prose-td:px-3 prose-td:py-1.5 prose-td:border prose-td:border-border prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-pre:text-foreground prose-pre:text-[12px] prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none prose-li:text-[13px] prose-blockquote:border-l-[3px] prose-blockquote:border-blue-400 prose-blockquote:dark:border-blue-600 prose-blockquote:pl-4 prose-blockquote:italic prose-blockquote:text-muted-foreground prose-hr:border-border/50 prose-img:rounded-lg prose-img:shadow-md">
-                  <ReactMarkdown>{outputSummary}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={markdownComponents}>{outputSummary}</ReactMarkdown>
                 </article>
               )}
             </div>

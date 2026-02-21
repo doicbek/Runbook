@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { ActionList } from "@/components/action-list";
 import { CreateActionDialog } from "@/components/create-action-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
 
 export default function HomePage() {
   return (
@@ -17,6 +19,16 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <Link href="/agents">
+              <Button variant="outline" size="sm">
+                🤖 Agent Studio
+              </Button>
+            </Link>
+            <Link href="/planner">
+              <Button variant="outline" size="sm">
+                🧠 Planner
+              </Button>
+            </Link>
             <CreateActionDialog />
           </div>
         </div>

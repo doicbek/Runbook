@@ -6,15 +6,16 @@ A web application for agentic workflows. Create actions from natural language pr
 
 - **Frontend**: Next.js 16 (App Router), TypeScript, Tailwind CSS v4, ShadCN UI, TanStack Query, Zustand
 - **Backend**: Python, FastAPI, SQLAlchemy (async), aiosqlite, SQLite
+- **LLM Providers**: OpenAI, Anthropic, DeepSeek, Google Gemini (auto-selects best model per agent type)
 - **Planner**: OpenAI GPT-4o with structured output
 - **Real-time**: Server-Sent Events (SSE) via sse-starlette
-- **Execution**: In-process async DAG executor (asyncio), mock agents
+- **Execution**: In-process async DAG executor (asyncio), specialized agents (arXiv RAG, code execution, mock)
 
 ## Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- OpenAI API key (optional for mock mode)
+- At least one LLM API key (OpenAI recommended as baseline)
 
 ## Setup
 
@@ -31,9 +32,12 @@ Create a `.env` file in `backend/`:
 
 ```
 OPENAI_API_KEY=sk-your-key-here
+ANTHROPIC_API_KEY=sk-ant-your-key-here    # optional
+DEEPSEEK_API_KEY=sk-your-key-here         # optional
+GOOGLE_API_KEY=your-key-here              # optional
 ```
 
-Without an API key, the planner falls back to a single task per action.
+Without any API key, the planner falls back to a single task per action. Each configured key unlocks its provider's models. If only `OPENAI_API_KEY` is set, all tasks gracefully fall back to GPT-4o.
 
 ### Frontend
 
@@ -103,6 +107,7 @@ The frontend connects to the backend at `http://localhost:8001` by default. Over
 | `PATCH` | `/actions/:id/tasks/:taskId` | Edit task (invalidates downstream) |
 | `GET` | `/actions/:id/tasks/:taskId/logs` | Get task execution logs |
 | `GET` | `/artifacts/:id` | Get artifact metadata |
+| `GET` | `/models` | List available LLM models and defaults |
 | `GET` | `/health` | Health check |
 
 ## SSE Event Types
@@ -132,12 +137,15 @@ backend/
       tasks.py           # Task create/edit + logs
       artifacts.py       # Artifact retrieval
     services/
+      llm_client.py      # Unified multi-provider LLM client
       planner.py         # OpenAI GPT-4o structured output planner
       executor.py        # Async DAG executor
       event_bus.py       # In-process pub/sub for SSE
       agents/
         base.py          # Abstract base agent
-        mock_agent.py    # Mock agent (sleep + stub output)
+        mock_agent.py    # Mock agent with LLM output generation
+        arxiv_search_agent.py  # arXiv RAG agent (search + ChromaDB + synthesis)
+        code_execution_agent.py # Sandboxed Python code agent
 
 frontend/
   src/
@@ -156,11 +164,34 @@ frontend/
     types/               # TypeScript interfaces
 ```
 
+## Multi-Model LLM Support
+
+The system supports 4 LLM providers and auto-selects the best model per agent type:
+
+| Agent Type | Default Model | Rationale |
+|---|---|---|
+| `arxiv_search` | Claude Sonnet 4.5 | Excellent at research synthesis |
+| `code_execution` | DeepSeek Chat | Best at code generation |
+| `report` | Claude Sonnet 4.5 | Great at long-form writing |
+| `data_retrieval` | GPT-4o Mini | Simple task, fast/cheap |
+| `spreadsheet` | GPT-4o Mini | Structured data, fast |
+| `general` | GPT-4o | Good all-rounder |
+
+The planner assigns models automatically when creating tasks. Users can override the model per task via the editor dropdown in the UI. If a provider's API key isn't configured, tasks fall back gracefully to the next available model.
+
+The unified LLM client (`backend/app/services/llm_client.py`) routes:
+- **OpenAI / DeepSeek / Google Gemini** through `AsyncOpenAI` with appropriate `base_url`
+- **Anthropic** through `AsyncAnthropic` with automatic message format conversion
+
 ## Features
 
+- Multi-provider LLM support (OpenAI, Anthropic, DeepSeek, Google Gemini)
+- Per-task model selection with smart defaults
 - Dark mode (system-aware with manual toggle)
-- Markdown rendering for task outputs
+- Markdown rendering with LaTeX math support
 - Topological sort for task display order
 - Parallel task execution
 - DAG invalidation on edit (BFS downstream reset)
 - Real-time SSE updates with Zustand overlay
+- arXiv RAG agent (search + vector store + LLM synthesis)
+- Sandboxed Python code execution with artifact generation

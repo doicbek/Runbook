@@ -14,7 +14,7 @@ export async function createTask(
 export async function updateTask(
   actionId: string,
   taskId: string,
-  body: { prompt?: string; dependencies?: string[] }
+  body: { prompt?: string; model?: string | null; agent_type?: string; dependencies?: string[] }
 ): Promise<Task> {
   return apiFetch<Task>(`/actions/${actionId}/tasks/${taskId}`, {
     method: "PATCH",

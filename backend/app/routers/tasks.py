@@ -53,6 +53,7 @@ async def create_task(
         action_id=action_id,
         prompt=body.prompt,
         agent_type=body.agent_type,
+        model=body.model,
         dependencies=body.dependencies,
         status="pending",
     )
@@ -83,6 +84,10 @@ async def update_task(
 
     if body.prompt is not None:
         task.prompt = body.prompt
+    if body.model is not None:
+        task.model = body.model
+    if body.agent_type is not None:
+        task.agent_type = body.agent_type
     if body.dependencies is not None:
         task.dependencies = body.dependencies
 

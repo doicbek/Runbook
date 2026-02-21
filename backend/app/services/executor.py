@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
-from app.models import Action, Log, Task, TaskOutput
-from app.services.agents.mock_agent import MockAgent
+from app.models import Action, Artifact, Log, Task, TaskOutput
+from app.services.agents.registry import get_agent_async
 from app.services.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ async def _execute_dag(action_id: str):
                 continue
 
             # Dispatch ready tasks in parallel
-            coros = [_run_task(action_id, t.id, t.prompt, t.agent_type, t.dependencies) for t in ready]
+            coros = [_run_task(action_id, t.id, t.prompt, t.agent_type, t.dependencies, t.model) for t in ready]
             await asyncio.gather(*coros, return_exceptions=True)
 
         # Check final status
@@ -181,23 +181,32 @@ async def _run_task(
     prompt: str,
     agent_type: str,
     dependency_ids: list[str],
+    model: str | None = None,
 ):
-    """Run a single task with the appropriate mock agent."""
+    """Run a single task with the appropriate agent."""
     await event_bus.publish(action_id, "task.started", {
         "task_id": task_id,
         "action_id": action_id,
     })
 
     async def log_callback(level: str, message: str):
-        async with async_session() as db:
-            log = Log(
-                task_id=task_id,
-                level=level,
-                message=message,
-                timestamp=datetime.now(timezone.utc),
-            )
-            db.add(log)
-            await db.commit()
+        for attempt in range(3):
+            try:
+                async with async_session() as db:
+                    log = Log(
+                        task_id=task_id,
+                        level=level,
+                        message=message,
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    db.add(log)
+                    await db.commit()
+                break
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(0.2 * (attempt + 1))
+                else:
+                    logger.warning(f"Failed to persist log for task {task_id}: {message[:80]}")
         await event_bus.publish(action_id, "log.append", {
             "task_id": task_id,
             "level": level,
@@ -205,7 +214,7 @@ async def _run_task(
         })
 
     try:
-        # Gather dependency outputs
+        # Gather dependency outputs (text + artifact URLs)
         dep_outputs = {}
         async with async_session() as db:
             for dep_id in dependency_ids:
@@ -214,10 +223,25 @@ async def _run_task(
                 )
                 output = result.scalar_one_or_none()
                 if output:
-                    dep_outputs[dep_id] = output.text
+                    text = output.text or ""
+                    # Append artifact image URLs so downstream agents can reference them
+                    art_result = await db.execute(
+                        select(Artifact).where(Artifact.task_id == dep_id)
+                    )
+                    artifacts = list(art_result.scalars().all())
+                    if artifacts:
+                        text += "\n\n**Artifacts from this task:**\n"
+                        for art in artifacts:
+                            url = f"http://localhost:8001/artifacts/{art.id}/content"
+                            if art.mime_type and art.mime_type.startswith("image/"):
+                                text += f"![{art.type}]({url})\n"
+                            else:
+                                text += f"- [{art.type}: {art.mime_type}]({url})\n"
+                    dep_outputs[dep_id] = text
 
-        agent = MockAgent(agent_type=agent_type)
-        result = await agent.execute(task_id, prompt, dep_outputs, log_callback)
+        async with async_session() as db:
+            agent = await get_agent_async(agent_type, db)
+        result = await agent.execute(task_id, prompt, dep_outputs, log_callback, model=model)
 
         # Save output
         async with async_session() as db:

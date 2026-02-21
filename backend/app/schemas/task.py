@@ -6,11 +6,14 @@ from pydantic import BaseModel
 class TaskCreate(BaseModel):
     prompt: str
     agent_type: str = "general"
+    model: str | None = None
     dependencies: list[str] = []
 
 
 class TaskUpdate(BaseModel):
     prompt: str | None = None
+    model: str | None = None
+    agent_type: str | None = None
     dependencies: list[str] | None = None
 
 
@@ -20,6 +23,7 @@ class TaskResponse(BaseModel):
     prompt: str
     status: str
     agent_type: str
+    model: str | None = None
     dependencies: list[str]
     output_summary: str | None = None
     created_at: datetime

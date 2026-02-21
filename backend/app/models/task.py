@@ -15,6 +15,7 @@ class Task(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, running, completed, failed
     agent_type: Mapped[str] = mapped_column(String(50), default="general")
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     dependencies: Mapped[list] = mapped_column(JSON, default=list)  # array of task IDs
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
