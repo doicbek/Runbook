@@ -16,6 +16,43 @@ class ModelConfig:
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    "openai/gpt-4.1": ModelConfig(
+        provider="openai",
+        model_id="gpt-4.1",
+        display_name="GPT-4.1",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/gpt-4.1-mini": ModelConfig(
+        provider="openai",
+        model_id="gpt-4.1-mini",
+        display_name="GPT-4.1 Mini",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/gpt-4.1-nano": ModelConfig(
+        provider="openai",
+        model_id="gpt-4.1-nano",
+        display_name="GPT-4.1 Nano",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/o3": ModelConfig(
+        provider="openai",
+        model_id="o3",
+        display_name="o3",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/o3-mini": ModelConfig(
+        provider="openai",
+        model_id="o3-mini",
+        display_name="o3-mini",
+        api_key_setting="OPENAI_API_KEY",
+    ),
+    "openai/o4-mini": ModelConfig(
+        provider="openai",
+        model_id="o4-mini",
+        display_name="o4-mini",
+        api_key_setting="OPENAI_API_KEY",
+    ),
     "openai/gpt-4o": ModelConfig(
         provider="openai",
         model_id="gpt-4o",
@@ -28,18 +65,52 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         display_name="GPT-4o Mini",
         api_key_setting="OPENAI_API_KEY",
     ),
+    # ── Anthropic ─────────────────────────────────────────────────────────────
+    "anthropic/claude-opus-4-6": ModelConfig(
+        provider="anthropic",
+        model_id="claude-opus-4-6",
+        display_name="Claude Opus 4.6",
+        api_key_setting="ANTHROPIC_API_KEY",
+    ),
+    "anthropic/claude-sonnet-4-6": ModelConfig(
+        provider="anthropic",
+        model_id="claude-sonnet-4-6",
+        display_name="Claude Sonnet 4.6",
+        api_key_setting="ANTHROPIC_API_KEY",
+    ),
+    "anthropic/claude-haiku-4-5": ModelConfig(
+        provider="anthropic",
+        model_id="claude-haiku-4-5-20251001",
+        display_name="Claude Haiku 4.5",
+        api_key_setting="ANTHROPIC_API_KEY",
+    ),
     "anthropic/claude-sonnet-4-5-20250929": ModelConfig(
         provider="anthropic",
         model_id="claude-sonnet-4-5-20250929",
         display_name="Claude Sonnet 4.5",
         api_key_setting="ANTHROPIC_API_KEY",
     ),
-    "deepseek/deepseek-chat": ModelConfig(
-        provider="deepseek",
-        model_id="deepseek-chat",
-        display_name="DeepSeek Chat",
-        api_key_setting="DEEPSEEK_API_KEY",
-        base_url="https://api.deepseek.com",
+    # ── Google ────────────────────────────────────────────────────────────────
+    "google/gemini-2.5-pro": ModelConfig(
+        provider="google",
+        model_id="gemini-2.5-pro",
+        display_name="Gemini 2.5 Pro",
+        api_key_setting="GOOGLE_API_KEY",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    ),
+    "google/gemini-2.5-flash": ModelConfig(
+        provider="google",
+        model_id="gemini-2.5-flash",
+        display_name="Gemini 2.5 Flash",
+        api_key_setting="GOOGLE_API_KEY",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    ),
+    "google/gemini-2.5-flash-lite": ModelConfig(
+        provider="google",
+        model_id="gemini-2.5-flash-lite",
+        display_name="Gemini 2.5 Flash Lite",
+        api_key_setting="GOOGLE_API_KEY",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     ),
     "google/gemini-2.0-flash": ModelConfig(
         provider="google",
@@ -48,18 +119,26 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         api_key_setting="GOOGLE_API_KEY",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     ),
+    # ── DeepSeek ──────────────────────────────────────────────────────────────
+    "deepseek/deepseek-chat": ModelConfig(
+        provider="deepseek",
+        model_id="deepseek-chat",
+        display_name="DeepSeek Chat",
+        api_key_setting="DEEPSEEK_API_KEY",
+        base_url="https://api.deepseek.com",
+    ),
 }
 
 DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
-    "arxiv_search": "anthropic/claude-sonnet-4-5-20250929",
-    "code_execution": "openai/gpt-4o",
-    "report": "anthropic/claude-sonnet-4-5-20250929",
-    "data_retrieval": "openai/gpt-4o-mini",
-    "spreadsheet": "openai/gpt-4o-mini",
-    "general": "openai/gpt-4o",
+    "arxiv_search": "anthropic/claude-sonnet-4-6",
+    "code_execution": "openai/gpt-4.1",
+    "report": "anthropic/claude-sonnet-4-6",
+    "data_retrieval": "openai/gpt-4.1-mini",
+    "spreadsheet": "openai/gpt-4.1",
+    "general": "openai/gpt-4.1",
 }
 
-FALLBACK_MODEL = "openai/gpt-4o"
+FALLBACK_MODEL = "openai/gpt-4.1"
 
 
 def _get_api_key(setting_name: str) -> str:

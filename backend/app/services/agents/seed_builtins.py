@@ -55,9 +55,13 @@ BUILTIN_AGENTS = [
         "agent_type": "spreadsheet",
         "name": "Spreadsheet",
         "description": (
-            "Mock implementation — does not create real spreadsheet files. Uses an LLM to "
-            "generate a markdown table that looks like spreadsheet data, including summary "
-            "statistics. To produce real .xlsx files, build a custom agent using openpyxl."
+            "Real implementation — uses an LLM to generate openpyxl Python code from the task "
+            "prompt, then executes it in a sandboxed subprocess. Creates a real .xlsx file with "
+            "formatted headers (bold + blue fill), auto-sized columns, frozen top row, a Summary "
+            "sheet with statistics, and a markdown table preview in stdout. Parses upstream "
+            "markdown tables as input data; generates synthetic data if none is provided. "
+            "Downloads the .xlsx as an artifact. Best for structured data, financial models, "
+            "and datasets that need to be opened in Excel."
         ),
         "tools": ["openpyxl"],
         "status": "active",
@@ -68,10 +72,13 @@ BUILTIN_AGENTS = [
         "agent_type": "report",
         "name": "Report",
         "description": (
-            "Mock implementation — uses an LLM to synthesize inputs from upstream tasks into a "
-            "multi-section markdown document with headings, findings, and conclusions. Preserves "
-            "image markdown tags (plots/artifacts) from upstream tasks so they render inline. "
-            "Supports LaTeX math notation. Typically placed as the final task in a workflow."
+            "Real implementation — multi-step synthesis pipeline: (1) extracts key findings from "
+            "each upstream task output in parallel, (2) builds a structured outline (Executive "
+            "Summary → thematic sections → Conclusions), (3) writes each section in parallel "
+            "using the upstream findings as context, (4) assembles the final document and weaves "
+            "in any inline images (plots/artifacts) from upstream tasks at contextually "
+            "appropriate locations. Supports LaTeX math ($...$ inline, $$...$$ display). "
+            "Typically placed as the final task in a workflow."
         ),
         "tools": [],
         "status": "active",
@@ -82,10 +89,13 @@ BUILTIN_AGENTS = [
         "agent_type": "general",
         "name": "General",
         "description": (
-            "Mock implementation — catch-all agent for tasks that don't fit other categories. "
-            "Passes the task prompt and any upstream outputs to an LLM and returns the response "
-            "as markdown. No tool access. Use for summarization, transformation, or reasoning "
-            "tasks that don't require code execution or external data."
+            "Real implementation — chain-of-thought reasoning agent. First classifies the task "
+            "type and selects a reasoning strategy (direct answer vs. multi-step). For complex "
+            "tasks: generates a step-by-step reasoning plan, executes each step sequentially "
+            "(each step builds on prior results), then synthesises a polished markdown answer "
+            "from the reasoning chain. Supports LaTeX math, tables, code blocks. Use for "
+            "summarisation, analysis, comparison, transformation, explanation, or Q&A tasks "
+            "that do not require code execution or live data retrieval."
         ),
         "tools": [],
         "status": "active",

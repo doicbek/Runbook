@@ -23,6 +23,15 @@ def get_agent(agent_type: str) -> BaseAgent:
     if agent_type == "data_retrieval":
         from app.services.agents.data_retrieval_agent import DataRetrievalAgent
         return DataRetrievalAgent()
+    if agent_type == "spreadsheet":
+        from app.services.agents.spreadsheet_agent import SpreadsheetAgent
+        return SpreadsheetAgent()
+    if agent_type == "report":
+        from app.services.agents.report_agent import ReportAgent
+        return ReportAgent()
+    if agent_type == "general":
+        from app.services.agents.general_agent import GeneralAgent
+        return GeneralAgent()
     return MockAgent(agent_type=agent_type)
 
 
@@ -57,6 +66,15 @@ async def get_agent_async(agent_type: str, db: AsyncSession) -> BaseAgent:
     if agent_type == "data_retrieval":
         from app.services.agents.data_retrieval_agent import DataRetrievalAgent
         return DataRetrievalAgent()
+    if agent_type == "spreadsheet":
+        from app.services.agents.spreadsheet_agent import SpreadsheetAgent
+        return SpreadsheetAgent()
+    if agent_type == "report":
+        from app.services.agents.report_agent import ReportAgent
+        return ReportAgent()
+    if agent_type == "general":
+        from app.services.agents.general_agent import GeneralAgent
+        return GeneralAgent()
 
     return MockAgent(agent_type=agent_type)
 
