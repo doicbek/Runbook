@@ -10,6 +10,7 @@ export interface Action {
   parent_task_id: string | null;
   output_contract: string | null;
   depth: number;
+  retry_count: number;
 }
 
 export interface ActionListItem {

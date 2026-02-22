@@ -27,6 +27,7 @@ class ActionResponse(BaseModel):
     parent_task_id: str | None = None
     output_contract: str | None = None
     depth: int = 0
+    retry_count: int = 0
 
     model_config = {"from_attributes": True}
 

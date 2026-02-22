@@ -18,9 +18,11 @@ const statusColors: Record<string, string> = {
 export function WorkspaceHeader({ action }: { action: Action }) {
   const runAction = useRunAction();
   const sseStatus = useActionStore((s) => s.actionStatus);
+  const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
   const status = sseStatus || action.status;
   const hasPendingTasks = action.tasks.some((t) => t.status === "pending");
   const isRunning = status === "running";
+  const isRecovering = isRunning && recoveryAttempt !== null;
 
   return (
     <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
@@ -41,6 +43,14 @@ export function WorkspaceHeader({ action }: { action: Action }) {
               )}
               {status}
             </Badge>
+            {isRecovering && (
+              <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 gap-1">
+                <svg className="w-3 h-3 animate-spin" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M6 1v2M6 9v2M1 6h2M9 6h2M2.2 2.2l1.4 1.4M8.4 8.4l1.4 1.4M2.2 9.8l1.4-1.4M8.4 3.6l1.4-1.4" strokeLinecap="round"/>
+                </svg>
+                Recovering ({recoveryAttempt}/{action.retry_count > 0 ? action.retry_count : recoveryAttempt})
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />

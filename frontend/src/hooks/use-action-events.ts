@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, appendTaskLog, setCodeExecution } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, appendTaskLog, setCodeExecution } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -72,16 +72,28 @@ export function useActionEvents(actionId: string, enabled = true) {
             break;
           case "action.completed":
             setActionStatus("completed");
+            setRecoveryAttempt(null);
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
             break;
           case "action.failed":
             setActionStatus("failed");
+            setRecoveryAttempt(null);
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
             break;
           case "action.started":
             setActionStatus("running");
+            break;
+          case "action.retrying":
+            setActionStatus("running");
+            setRecoveryAttempt(data.attempt as number);
+            // Refetch to get the patched task list
+            queryClient.invalidateQueries({ queryKey: ["action", actionId] });
+            break;
+          case "task.recovered":
+            // Refetch so the replaced task(s) appear in the UI
+            queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             break;
           case "code.started":
             setCodeExecution(data.task_id as string, {

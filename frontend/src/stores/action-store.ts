@@ -6,11 +6,13 @@ interface ActionStore {
   currentActionId: string;
   taskOverrides: Record<string, Partial<Task>>;
   actionStatus: string | null;
+  recoveryAttempt: number | null;  // set when action.retrying fires
   taskLogs: Record<string, { level: string; message: string; timestamp: string }[]>;
   codeExecutions: Record<string, CodeExecutionState>;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
+  setRecoveryAttempt: (attempt: number | null) => void;
   appendTaskLog: (taskId: string, log: { level: string; message: string }) => void;
   resetForAction: (actionId: string) => void;
   resetLogs: (taskId: string) => void;
@@ -28,6 +30,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   currentActionId: "",
   taskOverrides: {},
   actionStatus: null,
+  recoveryAttempt: null,
   taskLogs: {},
   codeExecutions: {},
 
@@ -41,6 +44,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
 
   setActionStatus: (status) =>
     set({ actionStatus: status }),
+
+  setRecoveryAttempt: (attempt) =>
+    set({ recoveryAttempt: attempt }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -58,6 +64,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       currentActionId: actionId,
       taskOverrides: {},
       actionStatus: null,
+      recoveryAttempt: null,
       taskLogs: {},
       codeExecutions: {},
     }),

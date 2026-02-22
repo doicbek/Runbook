@@ -30,6 +30,7 @@ async def init_db():
             "ALTER TABLE actions ADD COLUMN parent_task_id TEXT",
             "ALTER TABLE actions ADD COLUMN output_contract TEXT",
             "ALTER TABLE actions ADD COLUMN depth INTEGER DEFAULT 0",
+            "ALTER TABLE actions ADD COLUMN retry_count INTEGER DEFAULT 0",
             "ALTER TABLE tasks ADD COLUMN sub_action_id TEXT",
         ]:
             try:

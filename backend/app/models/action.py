@@ -25,5 +25,6 @@ class Action(Base):
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     output_contract: Mapped[str | None] = mapped_column(Text, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
 
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="action", cascade="all, delete-orphan")  # noqa: F821
