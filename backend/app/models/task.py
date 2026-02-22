@@ -25,6 +25,8 @@ class Task(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    sub_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     action: Mapped["Action"] = relationship("Action", back_populates="tasks")  # noqa: F821
     outputs: Mapped[list["TaskOutput"]] = relationship("TaskOutput", back_populates="task", cascade="all, delete-orphan")  # noqa: F821
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="task", cascade="all, delete-orphan")  # noqa: F821

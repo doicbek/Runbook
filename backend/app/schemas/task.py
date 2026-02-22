@@ -26,6 +26,7 @@ class TaskResponse(BaseModel):
     model: str | None = None
     dependencies: list[str]
     output_summary: str | None = None
+    sub_action_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

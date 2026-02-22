@@ -4,7 +4,9 @@ import { useActions } from "@/hooks/use-actions";
 import { ActionCard } from "@/components/action-card";
 
 export function ActionList() {
-  const { data: actions, isLoading, error } = useActions();
+  const { data: allActions, isLoading, error } = useActions();
+  // Only show root actions (depth=0) — sub-actions are accessible from parent task cards
+  const actions = allActions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
 
   if (isLoading) {
     return (

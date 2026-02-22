@@ -23,6 +23,10 @@ class ActionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     tasks: list[TaskResponse] = []
+    parent_action_id: str | None = None
+    parent_task_id: str | None = None
+    output_contract: str | None = None
+    depth: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -35,5 +39,7 @@ class ActionListResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     task_count: int = 0
+    parent_action_id: str | None = None
+    depth: int = 0
 
     model_config = {"from_attributes": True}

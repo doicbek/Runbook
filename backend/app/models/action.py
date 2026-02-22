@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Text, DateTime
+from sqlalchemy import Integer, String, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -20,5 +20,10 @@ class Action(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    parent_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    output_contract: Mapped[str | None] = mapped_column(Text, nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, default=0)
 
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="action", cascade="all, delete-orphan")  # noqa: F821

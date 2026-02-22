@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -21,6 +22,21 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Idempotent column migrations for existing DBs
+    async with engine.begin() as conn:
+        for stmt in [
+            "ALTER TABLE actions ADD COLUMN parent_action_id TEXT",
+            "ALTER TABLE actions ADD COLUMN parent_task_id TEXT",
+            "ALTER TABLE actions ADD COLUMN output_contract TEXT",
+            "ALTER TABLE actions ADD COLUMN depth INTEGER DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN sub_action_id TEXT",
+        ]:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists
+
     # Enable WAL mode for better concurrency
     async with engine.connect() as conn:
         await conn.exec_driver_sql("PRAGMA journal_mode=WAL")

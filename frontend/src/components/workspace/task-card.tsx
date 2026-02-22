@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -52,13 +53,14 @@ const statusConfig: Record<
   },
 };
 
-const agentTypeConfig: Record<string, { label: string; icon: string }> = {
+const agentTypeConfig: Record<string, { label: string; icon: string; className?: string }> = {
   data_retrieval: { label: "Data", icon: "DB" },
   spreadsheet: { label: "Sheet", icon: "TBL" },
   code_execution: { label: "Code", icon: "{ }" },
   report: { label: "Report", icon: "DOC" },
   general: { label: "General", icon: "GEN" },
   arxiv_search: { label: "arXiv", icon: "arX" },
+  sub_action: { label: "Sub-Action", icon: "↗", className: "bg-violet-500/20 text-violet-300" },
 };
 
 function hasCodeBlocks(text: string | null | undefined): boolean {
@@ -146,7 +148,7 @@ export function TaskCard({
             <span className="text-[10px] font-mono font-bold text-muted-foreground/60 tabular-nums">
               #{index + 1}
             </span>
-            <span className="text-[10px] font-mono font-semibold tracking-widest uppercase text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+            <span className={`text-[10px] font-mono font-semibold tracking-widest uppercase px-1.5 py-0.5 rounded ${agentConfig.className ?? "text-muted-foreground bg-muted/60"}`}>
               {agentConfig.icon}
             </span>
             <span className="text-[11px] text-muted-foreground">
@@ -245,6 +247,21 @@ export function TaskCard({
               )}
             </div>
           </>
+        )}
+
+        {/* Sub-action link */}
+        {task.sub_action_id && (
+          <div className="px-4 pb-2">
+            <Link
+              href={`/actions/${task.sub_action_id}`}
+              className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M7 2h3v3M10 2L6 6M5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1V7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              View sub-action
+            </Link>
+          </div>
         )}
 
         {/* Code Execution Section */}

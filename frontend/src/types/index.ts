@@ -6,6 +6,10 @@ export interface Action {
   created_at: string;
   updated_at: string;
   tasks: Task[];
+  parent_action_id: string | null;
+  parent_task_id: string | null;
+  output_contract: string | null;
+  depth: number;
 }
 
 export interface ActionListItem {
@@ -16,6 +20,8 @@ export interface ActionListItem {
   created_at: string;
   updated_at: string;
   task_count: number;
+  parent_action_id: string | null;
+  depth: number;
 }
 
 export interface Task {
@@ -27,6 +33,7 @@ export interface Task {
   model: string | null;
   dependencies: string[];
   output_summary: string | null;
+  sub_action_id: string | null;
   created_at: string;
   updated_at: string;
 }

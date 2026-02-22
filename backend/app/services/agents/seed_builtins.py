@@ -102,6 +102,20 @@ BUILTIN_AGENTS = [
         "is_builtin": True,
         "icon": "🤖",
     },
+    {
+        "agent_type": "sub_action",
+        "name": "Sub-Action",
+        "description": (
+            "Spawns a child action with its own planner-generated DAG for complex sub-problems. "
+            "Use when a sub-problem is itself complex enough to require multi-step planning "
+            "(e.g., a full research-then-analysis sub-workflow). The task prompt must specify "
+            "exactly what output the sub-action should produce. Max depth: 3 levels."
+        ),
+        "tools": [],
+        "status": "active",
+        "is_builtin": True,
+        "icon": "↗",
+    },
 ]
 
 

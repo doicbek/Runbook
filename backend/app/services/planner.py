@@ -15,7 +15,7 @@ SYSTEM_PROMPT = """You are a task planner for an agentic workflow system. Given 
 
 Each task must have:
 - prompt: A specific, concrete instruction (not vague like "analyze data" but specific like "fetch weather data for San Francisco from the Open-Meteo API for all of 2025")
-- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "report", "general", "arxiv_search"
+- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "report", "general", "arxiv_search", "sub_action"
 - dependencies: Array of 0-based indices of tasks this task depends on (must only reference earlier tasks)
 - model: (optional) Override the LLM model for this task. Use "provider/model_id" format. Leave null to use the default for the agent type.
 
@@ -26,6 +26,7 @@ Agent type guidelines:
 - "spreadsheet": Create or manipulate structured tabular data.
 - "report": Generate a formatted markdown report or document synthesizing inputs from other tasks.
 - "general": Catch-all for tasks that don't fit other categories.
+- "sub_action": Spawn a child action with its own multi-step planner-generated DAG. Use ONLY when a sub-problem is itself so complex that it requires multiple sequential or parallel steps to solve (e.g., a full research-then-analysis pipeline, or a multi-stage data collection and processing workflow). The task prompt must specify exactly what the sub-action should produce as output. Do NOT use sub_action for simple single-step tasks.
 
 Available LLM models and their strengths:
 - "openai/gpt-4o": Good all-rounder (default for general tasks)
@@ -40,6 +41,7 @@ Common workflow patterns:
 - Research + analysis: arxiv_search → code_execution → report
 - Data pipeline: data_retrieval → code_execution → report
 - Literature review: arxiv_search → report
+- Deep research: sub_action (literature review + analysis sub-workflow) → code_execution → report
 
 IMPORTANT RULES:
 - The LAST task must ALWAYS be a "report" task that synthesizes and summarizes all outputs from upstream tasks. Never end with code_execution, data_retrieval, or any non-report task.

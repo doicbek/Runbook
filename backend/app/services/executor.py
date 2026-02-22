@@ -249,6 +249,8 @@ async def _run_task(
             task = task_result.scalar_one()
             task.status = "completed"
             task.output_summary = result.get("summary", "Completed")
+            if result.get("sub_action_id"):
+                task.sub_action_id = result["sub_action_id"]
 
             task_output = TaskOutput(
                 task_id=task_id,

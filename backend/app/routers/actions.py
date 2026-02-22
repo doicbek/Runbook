@@ -97,6 +97,8 @@ async def list_actions(
                 created_at=action.created_at,
                 updated_at=action.updated_at,
                 task_count=task_count,
+                parent_action_id=action.parent_action_id,
+                depth=action.depth or 0,
             )
         )
     return response

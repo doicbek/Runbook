@@ -32,6 +32,9 @@ def get_agent(agent_type: str) -> BaseAgent:
     if agent_type == "general":
         from app.services.agents.general_agent import GeneralAgent
         return GeneralAgent()
+    if agent_type == "sub_action":
+        from app.services.agents.sub_action_agent import SubActionAgent
+        return SubActionAgent()
     return MockAgent(agent_type=agent_type)
 
 
@@ -75,6 +78,9 @@ async def get_agent_async(agent_type: str, db: AsyncSession) -> BaseAgent:
     if agent_type == "general":
         from app.services.agents.general_agent import GeneralAgent
         return GeneralAgent()
+    if agent_type == "sub_action":
+        from app.services.agents.sub_action_agent import SubActionAgent
+        return SubActionAgent()
 
     return MockAgent(agent_type=agent_type)
 
