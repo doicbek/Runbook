@@ -149,6 +149,13 @@ class CodeExecutionAgent(BaseAgent):
                 if out_str and "No Results" not in out_str and "No content retrieved" not in out_str:
                     dep_context += f"\n\nUpstream task output:\n{out_str[:1500]}"
 
+        # Extract downloadable artifact URLs from dependency context and inject
+        # explicit urllib.request.urlretrieve snippets so the LLM doesn't try to
+        # open them as local files.
+        artifact_download_snippet = self._build_artifact_download_snippet(dep_context)
+        if artifact_download_snippet:
+            dep_context += artifact_download_snippet
+
         force_fetch_instruction = ""
         if force_fetch or not dep_context:
             force_fetch_instruction = (
@@ -180,6 +187,13 @@ class CodeExecutionAgent(BaseAgent):
                         "  Params: latitude, longitude, start_date (YYYY-MM-DD), end_date, daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean, timezone=auto\n"
                         "  San Jose CA: latitude=37.3382, longitude=-121.8863\n"
                         "  Example: import urllib.request, json; url='https://archive-api.open-meteo.com/v1/archive?latitude=37.3382&longitude=-121.8863&start_date=2023-01-01&end_date=2023-12-31&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&timezone=auto'; data=json.loads(urllib.request.urlopen(url).read())\n\n"
+                        "IMPORTANT — Artifact files from upstream tasks:\n"
+                        "- Upstream task artifacts (xlsx, csv, png, etc.) are served via HTTP URLs, NOT available as local files.\n"
+                        "- If the user context lists 'ARTIFACT FILES TO DOWNLOAD', you MUST download each file first:\n"
+                        "    import urllib.request\n"
+                        "    urllib.request.urlretrieve('http://...', 'local_name.ext')\n"
+                        "  Then read the local file normally (e.g. pd.read_excel('local_name.ext')).\n"
+                        "- NEVER use a bare filename like 'output.xlsx' without first downloading it from its URL.\n\n"
                         "Rules:\n"
                         "- Output ONLY the Python code — no markdown fences, no explanations, no comments about what you're doing\n"
                         "- Always use plt.show() to display plots (it will be intercepted and saved as a file)\n"
@@ -201,6 +215,59 @@ class CodeExecutionAgent(BaseAgent):
         code = re.sub(r"^```(?:python|py)?\s*\n?", "", code)
         code = re.sub(r"\n?```\s*$", "", code)
         return code.strip()
+
+    def _build_artifact_download_snippet(self, dep_context: str) -> str:
+        """Parse artifact URLs from dependency context and return an explicit download block.
+
+        Looks for markdown links of the form:
+          [Download filename.ext](http://localhost:PORT/artifacts/ID/content)
+          [filename.ext](http://localhost:PORT/artifacts/ID/content)
+          - [file: mime/type](http://localhost:PORT/artifacts/ID/content)
+        """
+        # Match: text inside brackets + URL inside parentheses pointing to /artifacts/
+        pattern = re.compile(
+            r'\[([^\]]*?)\]\((https?://[^)]+/artifacts/[^)]+/content)\)'
+        )
+        downloads = []
+        seen_urls = set()
+        for match in pattern.finditer(dep_context):
+            label = match.group(1).strip()
+            url = match.group(2).strip()
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            # Derive a sensible local filename from the label
+            # Labels look like "Download output.xlsx", "file: application/vnd...", "output.png"
+            label_clean = re.sub(r"^Download\s+", "", label, flags=re.IGNORECASE).strip()
+            # If label doesn't look like a filename, try to guess extension from mime
+            if "." not in label_clean or "/" in label_clean:
+                # Mime-type label like "file: application/vnd.openxmlformats..."
+                if "spreadsheet" in label_clean or "excel" in label_clean:
+                    label_clean = "upstream_data.xlsx"
+                elif "csv" in label_clean:
+                    label_clean = "upstream_data.csv"
+                elif "json" in label_clean:
+                    label_clean = "upstream_data.json"
+                elif "image" in label_clean or "png" in label_clean:
+                    label_clean = "upstream_image.png"
+                else:
+                    label_clean = "upstream_file.bin"
+
+            downloads.append((url, label_clean))
+
+        if not downloads:
+            return ""
+
+        lines = ["\n\nARTIFACT FILES TO DOWNLOAD (download these before reading them):"]
+        lines.append("import urllib.request")
+        for url, filename in downloads:
+            lines.append(f'urllib.request.urlretrieve("{url}", "{filename}")')
+        lines.append(
+            "# After the downloads above, read the files by their local names "
+            "(e.g. pd.read_excel('upstream_data.xlsx'))"
+        )
+        return "\n".join(lines)
 
     def _build_summary(
         self,
