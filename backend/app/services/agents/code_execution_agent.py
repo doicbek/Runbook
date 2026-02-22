@@ -83,6 +83,8 @@ class CodeExecutionAgent(BaseAgent):
                     await log_callback("error", stderr[:500])
 
         # Step 4: Save artifacts to DB
+        # NOTE: log_callback must NOT be called inside this session — it opens its own
+        # DB session which deadlocks on the SQLite write lock held by this transaction.
         artifact_urls = []
         async with async_session() as db:
             # Clean old artifacts for this task
@@ -106,17 +108,13 @@ class CodeExecutionAgent(BaseAgent):
                 await db.flush()
                 await db.refresh(artifact)
 
-                url = f"http://localhost:8001/artifacts/{artifact.id}/content"
                 artifact_urls.append({
                     "id": artifact.id,
-                    "url": url,
+                    "url": f"http://localhost:8001/artifacts/{artifact.id}/content",
                     "type": f["type"],
                     "mime_type": f["mime_type"],
                     "filename": f["filename"],
                 })
-
-                if log_callback:
-                    await log_callback("info", f"Saved artifact: {f['filename']} ({f['mime_type']})")
 
             # Update TaskOutput artifact_ids if it exists
             to_result = await db.execute(
@@ -127,6 +125,11 @@ class CodeExecutionAgent(BaseAgent):
                 task_output.artifact_ids = [a["id"] for a in artifact_urls]
 
             await db.commit()
+
+        # Log artifact names after the DB session is closed (safe to write logs now)
+        if log_callback:
+            for art in artifact_urls:
+                await log_callback("info", f"Saved artifact: {art['filename']} ({art['mime_type']})")
 
         # Step 5: Build summary directly from code + results
         summary = self._build_summary(code, stdout, stderr, exit_code, artifact_urls)
