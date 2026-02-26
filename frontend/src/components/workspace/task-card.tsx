@@ -359,8 +359,10 @@ export function TaskCard({
   );
 }
 
+const EMPTY_LOGS: { level: string; message: string; timestamp: string }[] = [];
+
 function LiveActivityFeed({ taskId }: { taskId: string }) {
-  const logs = useActionStore((s) => s.taskLogs[taskId] || []);
+  const logs = useActionStore((s) => s.taskLogs[taskId] ?? EMPTY_LOGS);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new logs arrive

@@ -7,11 +7,15 @@ A Google Docs-inspired platform for **agentic workflows**. Describe what you wan
 ## Key Features
 
 - **Action workspace** — prompt → planner → editable task DAG → parallel execution
-- **6 real built-in agents** — arXiv search, code execution, data retrieval, spreadsheet, report, general
+- **7 real built-in agents** — arXiv search, code execution (auto-installs deps), data retrieval, spreadsheet, report, general, sub-action
 - **Agent Studio** — create, edit, and AI-modify custom agents with generated Python code
 - **Planner dashboard** — configure the planning model, system prompt, max tasks, and preview plans
 - **Multi-model LLM support** — OpenAI (GPT-5, GPT-4.1, o3/o4), Anthropic (Claude 4.6), Google (Gemini 2.5), DeepSeek
 - **Real-time updates** — Server-Sent Events stream task status, logs, and outputs live
+- **Live activity feed** — inline log display on running tasks with auto-scroll
+- **Auto-run** — actions execute immediately after prompt submission
+- **Inline error recovery** — on task failure, spawns recovery sub-actions iteratively (up to 3 attempts)
+- **Sub-actions** — hierarchical child workflows with breadcrumb navigation (max depth 3)
 - **Artifact system** — agents produce downloadable files (plots, .xlsx, .csv, JSON) stored as artifacts
 - **Inline rendering** — Markdown, LaTeX math ($...$ / $$...$$), and inline images in task outputs
 
@@ -42,6 +46,7 @@ A Google Docs-inspired platform for **agentic workflows**. Describe what you wan
 | 📊 Spreadsheet | `spreadsheet` | LLM generates openpyxl code → real .xlsx with formatted headers, frozen rows, summary sheet, artifact download |
 | 📝 Report | `report` | Multi-step: extract findings (parallel) → outline → write sections (parallel) → assemble with images + LaTeX |
 | 🤖 General | `general` | Chain-of-thought: classify → plan steps → execute steps → synthesise structured markdown answer |
+| 🔀 Sub-Action | `sub_action` | Spawns a child action with its own planner-generated DAG; artifact propagation, progress forwarding (max depth 3) |
 
 All agents accept upstream task outputs as context and pass them to downstream tasks.
 
@@ -108,10 +113,16 @@ npm install
 ## Running
 
 ```bash
+# Option 1 — Dev script (starts both backend and frontend)
+./dev.sh start       # start both
+./dev.sh stop        # stop both
+./dev.sh restart     # restart both
+./dev.sh status      # check if running
+
+# Option 2 — Manual
 # Terminal 1 — Backend (port 8001)
 cd backend
-source .venv/bin/activate
-uvicorn app.main:app --reload --port 8001
+uv run uvicorn app.main:app --reload --port 8001
 
 # Terminal 2 — Frontend (port 3000)
 cd frontend
@@ -149,6 +160,7 @@ The frontend connects to the backend at `http://localhost:8001` by default. Over
 | `PATCH` | `/actions/:id` | Update title/prompt |
 | `POST` | `/actions/:id/run` | Execute pending tasks |
 | `GET` | `/actions/:id/events` | SSE stream |
+| `GET` | `/actions/:id/breadcrumbs` | Parent chain for sub-actions |
 | `POST` | `/actions/:id/tasks` | Add a task |
 | `PATCH` | `/actions/:id/tasks/:taskId` | Edit task (invalidates downstream) |
 | `GET` | `/actions/:id/tasks/:taskId/logs` | Task logs |
@@ -196,7 +208,16 @@ The frontend connects to the backend at `http://localhost:8001` by default. Over
 | `task.failed` | `{ task_id, error, retry_count }` |
 | `log.append` | `{ task_id, level, message }` |
 | `action.completed` | `{ action_id }` |
+| `task.recovering` | `{ task_id, attempt, max_attempts, error }` |
+| `task.recovered` | `{ task_id }` |
+| `action.started` | `{ action_id }` |
 | `action.failed` | `{ action_id, reason }` |
+| `action.retrying` | `{ action_id, attempt }` |
+| `action.replanning` | `{ action_id }` |
+| `sub_action.progress` | `{ sub_action_id, status }` |
+| `code.started` | `{ task_id }` |
+| `code.completed` | `{ task_id, artifact_ids, stdout_preview }` |
+| `code.failed` | `{ task_id, stderr, error }` |
 
 ---
 
@@ -230,7 +251,8 @@ backend/
     services/
       llm_client.py           # Unified multi-provider LLM client
       planner.py              # DAG planner (OpenAI structured output)
-      executor.py             # Async DAG executor
+      executor.py             # Async DAG executor with inline recovery
+      recovery_planner.py     # Recovery planning for failed tasks
       event_bus.py            # In-process pub/sub for SSE
       code_runner.py          # Sandboxed subprocess Python runner
       arxiv_service.py        # arXiv API + ChromaDB vector store
@@ -245,9 +267,12 @@ backend/
         spreadsheet_agent.py  # openpyxl .xlsx generation agent
         report_agent.py       # Multi-step report synthesis agent
         general_agent.py      # Chain-of-thought reasoning agent
+        sub_action_agent.py   # Hierarchical child workflow agent
+        agent_memory.py       # Agent memory utilities
+        exceptions.py         # Agent-specific exceptions
         scaffolding_service.py   # LLM code generation for custom agents
         tool_catalog.py       # Static tool catalog (8 tools)
-        seed_builtins.py      # Seed 6 builtin agents on boot
+        seed_builtins.py      # Seed 7 builtin agents on boot
         registry.py           # Agent factory (DB-first, then native, then mock)
 
 frontend/
@@ -276,7 +301,7 @@ frontend/
 
 ### Using Built-in Agents
 
-All 6 built-in agents are pre-seeded at startup. Pick an agent type in the task editor dropdown. The planner automatically assigns appropriate agent types when decomposing prompts.
+All 7 built-in agents are pre-seeded at startup. Pick an agent type in the task editor dropdown. The planner automatically assigns appropriate agent types when decomposing prompts.
 
 ### Creating Custom Agents
 

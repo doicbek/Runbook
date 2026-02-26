@@ -549,13 +549,35 @@ Agents propose. The system executes. The user can intervene at any moment.
 - AI-modify panel: describe a change in plain English → LLM rewrites code → user reviews
 - Endpoints: CRUD + `/scaffold` + `/:id/modify`
 
-**6 Real built-in agents** (all `is_builtin=True`, seeded at startup)
+**7 Real built-in agents** (all `is_builtin=True`, seeded at startup)
 - `arxiv_search`: arXiv API + ChromaDB semantic search + LLM synthesis with citations
-- `code_execution`: LLM-generated Python → sandboxed subprocess → plots/files as artifacts
+- `code_execution`: LLM-generated Python → sandboxed subprocess → plots/files as artifacts; **auto-installs PyPI packages** (pre-scan imports, 70+ pip name mappings, stdlib guard, multi-round retry)
 - `data_retrieval`: LLM plans queries → DuckDuckGo → fetch pages → HTML tables/CSV/JSON/Excel → LLM synthesis
 - `spreadsheet`: LLM-generated openpyxl code → real `.xlsx` with formatting + Summary sheet → artifact download
 - `report`: extract findings (parallel) → outline → write sections (parallel) → assemble with images + LaTeX
 - `general`: chain-of-thought → classify → plan steps → execute steps → synthesise
+- `sub_action`: spawns a child action with its own planner-generated DAG (max depth 3); timeout protection, artifact propagation from child to parent, progress forwarding via event bus
+
+**Sub-actions**
+- Hierarchical child workflows: planner can assign `agent_type: "sub_action"` for complex sub-problems
+- Breadcrumb navigation in workspace header (depth badges, clickable parent chain)
+- Child artifacts automatically copied to parent task for downstream visibility
+- Progress events forwarded from child to parent action's SSE stream
+- API: `GET /actions/:id/breadcrumbs` returns parent chain (root first)
+
+**Inline error recovery**
+- On task failure, executor spawns recovery sub-actions iteratively (up to 3 attempts) before marking as failed
+- Recovery prompt includes original goal, error message, and prior failed attempts
+- SSE event `task.recovering` with attempt/max_attempts/error for live UI feedback
+- Outer DAG recovery (`_attempt_recovery`, `_full_replan`) remains as safety net after inline recovery exhausted
+
+**Auto-run**
+- Actions execute immediately after prompt submission (no manual "Run" button)
+- Resume button shown only when action is stopped with pending tasks
+
+**Live activity feed**
+- Inline log display on running tasks: latest 8 lines, auto-scroll, color-coded by level
+- Sub-action inline progress: mini task list with status dots, live polling
 
 **Planner Config dashboard** (`/planner`)
 - `planner_config` DB singleton — system_prompt, model, max_tasks, max_retries
