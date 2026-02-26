@@ -24,6 +24,7 @@ from app.services.agents.coding_tools import (
 )
 from app.services.event_bus import event_bus
 from app.services.llm_client import MODEL_REGISTRY, get_default_model_for_agent
+from app.services.pause_manager import pause_manager
 from app.services.worktree_manager import create_worktree, remove_worktree
 
 logger = logging.getLogger(__name__)
@@ -313,6 +314,39 @@ class CodingAgent(BaseAgent):
             raise ValueError(f"Unknown model: {model}")
 
         for iteration in range(1, MAX_ITERATIONS + 1):
+            # ── Check for pause signal ────────────────────────────────────
+            if pause_manager.is_paused(task_id):
+                if log_callback:
+                    await log_callback("info", "Task paused by user. Waiting for resume...")
+
+                # Update task status to paused
+                await self._set_task_status(task_id, "paused")
+
+                await event_bus.publish(action_id, "task.paused", {
+                    "task_id": task_id,
+                    "action_id": action_id,
+                    "iteration_number": iteration,
+                })
+
+                # Block until resumed
+                await pause_manager.wait_for_resume(task_id)
+
+                if log_callback:
+                    await log_callback("info", "Task resumed by user.")
+
+                # Check if user provided guidance
+                guidance = pause_manager.take_guidance(task_id)
+                if guidance:
+                    if log_callback:
+                        await log_callback("info", f"User guidance: {guidance[:200]}")
+                    messages.append({
+                        "role": "user",
+                        "content": f"[USER GUIDANCE — The user has paused and provided new instructions]\n{guidance}\n\n[Continue working on the task with the above guidance in mind.]",
+                    })
+
+                # Restore running status
+                await self._set_task_status(task_id, "running")
+
             iter_start = time.time()
 
             if log_callback:
@@ -745,6 +779,18 @@ class CodingAgent(BaseAgent):
                 await db.commit()
         except Exception:
             logger.exception(f"Failed to save iteration {iteration_number} for task {task_id}")
+
+    async def _set_task_status(self, task_id: str, status: str) -> None:
+        """Update the task status in the database."""
+        from app.models.task import Task
+        from sqlalchemy import select
+
+        async with async_session() as db:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                task.status = status
+                await db.commit()
 
     async def _get_action_id(self, task_id: str) -> str:
         """Get the action_id for a task."""

@@ -9,12 +9,18 @@ from app.database import get_db
 from app.models import Action, AgentIteration, Artifact, Log, Task, TaskOutput
 from app.schemas.task import AgentIterationResponse, ArtifactResponse, LogResponse, TaskCreate, TaskResponse, TaskUpdate
 from app.services.event_bus import event_bus
+from app.services.pause_manager import pause_manager
 
 router = APIRouter(tags=["tasks"])
 
 
 class RunCodeRequest(BaseModel):
     code: str | None = None
+
+
+class ResumeRequest(BaseModel):
+    guidance: str | None = None
+    redirect: bool = False
 
 
 class CodeExecutionResponse(BaseModel):
@@ -145,6 +151,97 @@ async def get_task_iterations(
         .order_by(AgentIteration.iteration_number)
     )
     return result.scalars().all()
+
+
+@router.post(
+    "/actions/{action_id}/tasks/{task_id}/pause",
+    response_model=TaskResponse,
+)
+async def pause_task(
+    action_id: str,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a pause signal for a running task."""
+    result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.action_id == action_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != "running":
+        raise HTTPException(status_code=400, detail=f"Cannot pause task with status '{task.status}' (must be running)")
+
+    pause_manager.pause(task_id)
+
+    await event_bus.publish(action_id, "task.paused", {
+        "task_id": task_id,
+        "action_id": action_id,
+    })
+
+    # Refresh to get current state (status will be updated by the agent loop)
+    await db.refresh(task)
+    return task
+
+
+@router.post(
+    "/actions/{action_id}/tasks/{task_id}/resume",
+    response_model=TaskResponse,
+)
+async def resume_task(
+    action_id: str,
+    task_id: str,
+    body: ResumeRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear the pause signal and optionally provide guidance text."""
+    result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.action_id == action_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != "paused":
+        raise HTTPException(status_code=400, detail=f"Cannot resume task with status '{task.status}' (must be paused)")
+
+    guidance = body.guidance if body else None
+
+    # If guidance provided, store it as an AgentIteration record
+    if guidance:
+        iteration = AgentIteration(
+            task_id=task_id,
+            action_id=action_id,
+            iteration_number=0,  # will be set properly by the agent
+            loop_type="user_guidance",
+            attempt_number=0,
+            reasoning=guidance,
+            tool_calls=[],
+            outcome="user_guidance",
+        )
+        db.add(iteration)
+        await db.commit()
+
+        await event_bus.publish(action_id, "task.user_guidance", {
+            "task_id": task_id,
+            "action_id": action_id,
+            "guidance": guidance[:500],
+        })
+
+    # Resume the task
+    pause_manager.resume(task_id, guidance)
+
+    task.status = "running"
+    await db.commit()
+    await db.refresh(task)
+
+    await event_bus.publish(action_id, "task.resumed", {
+        "task_id": task_id,
+        "action_id": action_id,
+    })
+
+    return task
 
 
 @router.post(
