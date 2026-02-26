@@ -8,6 +8,8 @@
 - Run `python -m py_compile` from `backend/` dir for quick typecheck; use `python -c "from app.models.X import Y"` to verify imports
 - Git operations must be run from repo root `/mnt/c/Users/dobec/actions/`
 - Backend Python runs from `/mnt/c/Users/dobec/actions/backend/`
+- For LLM tool calling, use provider SDKs directly (not `chat_completion()`); OpenAI and Anthropic have different tool call/result formats
+- CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
 
 ---
 
@@ -72,4 +74,22 @@
   - `difflib.unified_diff` needs `keepends=True` on splitlines to produce clean diffs
   - `asyncio.create_subprocess_shell` for shell commands vs `asyncio.create_subprocess_exec` for direct execution
   - Tool functions are standalone async functions, not methods on a class — keeps them easy to test and wire into LLM tool schemas
+---
+
+## 2026-02-26 - US-006
+- Implemented CodingAgent in `backend/app/services/agents/coding_agent.py` extending BaseAgent
+- Agentic loop: sends conversation history + tool definitions to LLM, executes tool calls, appends results, repeats until done/fail or max_iterations (50)
+- Supports both OpenAI-compatible and Anthropic providers for tool calling (different API formats)
+- 8 tool definitions: read_file, write_file, edit_file, glob, grep, bash, done, fail
+- Each iteration creates an AgentIteration record with reasoning, tool_calls (input+output+duration+success), and outcome
+- On completion: stores workspace_path and workspace_branch on Task, returns summary
+- On failure: cleans up worktree, preserves iteration history
+- Messages normalized to OpenAI dict format internally; Anthropic adapter converts tool_use/tool_result blocks
+- Files changed: `backend/app/services/agents/coding_agent.py` (new)
+- **Learnings for future iterations:**
+  - `chat_completion()` only returns text — for tool calling, must use provider SDKs directly
+  - OpenAI tool calls come back as `message.tool_calls[].function.{name, arguments}`; Anthropic uses `content[].type == "tool_use"` blocks
+  - Anthropic requires tool results as `{"role": "user", "content": [{"type": "tool_result", ...}]}` — NOT as `{"role": "tool"}`
+  - OpenAI newer models (gpt-5, o-series) use `max_completion_tokens` and don't support temperature
+  - Tool output truncation prevents context window overflow — use `_truncate()` helper
 ---
