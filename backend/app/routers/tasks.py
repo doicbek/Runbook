@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Action, Artifact, Log, Task, TaskOutput
-from app.schemas.task import ArtifactResponse, LogResponse, TaskCreate, TaskResponse, TaskUpdate
+from app.models import Action, AgentIteration, Artifact, Log, Task, TaskOutput
+from app.schemas.task import AgentIterationResponse, ArtifactResponse, LogResponse, TaskCreate, TaskResponse, TaskUpdate
 from app.services.event_bus import event_bus
 
 router = APIRouter(tags=["tasks"])
@@ -120,6 +120,29 @@ async def get_task_logs(
 
     result = await db.execute(
         select(Log).where(Log.task_id == task_id).order_by(Log.timestamp)
+    )
+    return result.scalars().all()
+
+
+@router.get(
+    "/actions/{action_id}/tasks/{task_id}/iterations",
+    response_model=list[AgentIterationResponse],
+)
+async def get_task_iterations(
+    action_id: str,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Task).where(Task.id == task_id, Task.action_id == action_id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    result = await db.execute(
+        select(AgentIteration)
+        .where(AgentIteration.task_id == task_id)
+        .order_by(AgentIteration.iteration_number)
     )
     return result.scalars().all()
 

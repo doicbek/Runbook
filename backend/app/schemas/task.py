@@ -65,3 +65,21 @@ class LogResponse(BaseModel):
     structured: dict | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AgentIterationResponse(BaseModel):
+    id: str
+    task_id: str
+    action_id: str
+    iteration_number: int
+    loop_type: str
+    attempt_number: int
+    reasoning: str | None = None
+    tool_calls: list = []
+    outcome: str
+    error: str | None = None
+    lessons_learned: str | None = None
+    created_at: datetime
+    duration_ms: int
+
+    model_config = {"from_attributes": True}
