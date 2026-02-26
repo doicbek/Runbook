@@ -44,3 +44,17 @@
   - Router pattern: import models from `app.models` (which re-exports from submodules); import schemas from `app.schemas.task`
   - Existing endpoint patterns: validate parent entity exists first, use `select().where().order_by()`, return `scalars().all()`
 ---
+
+## 2026-02-26 - US-004
+- Implemented git worktree manager service in `backend/app/services/worktree_manager.py`
+- Three async functions: `create_worktree(task_id, repo_path)`, `remove_worktree(worktree_path)`, `list_worktrees(repo_path)`
+- Worktrees created at `{repo_path}/.workdeck/worktrees/{task_id}/` with branch `workdeck/task-{task_id[:8]}`
+- Uses `asyncio.create_subprocess_exec` for git commands (non-blocking)
+- `WORKDECK_REPO_PATH` env var configures default repo path
+- Handles edge cases: branch already exists, worktree removal fallback, stale worktree pruning
+- Files changed: `backend/app/services/worktree_manager.py` (new)
+- **Learnings for future iterations:**
+  - Use `asyncio.create_subprocess_exec` for subprocess calls in async code (not `subprocess.run`)
+  - `git worktree list --porcelain` gives machine-parseable output with `worktree`, `HEAD`, `branch` fields
+  - Services don't need to be registered in models/__init__.py — only models do
+---
