@@ -1,0 +1,309 @@
+{
+  "project": "Workdeck",
+  "branchName": "ralph/coding-agent",
+  "description": "Coding Agent with Agentic Loop, Full History Tracking & Transparent Frontend",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add agent_iterations database table",
+      "description": "As a developer, I need a database table to store every iteration of the agentic loop so that history is queryable, referenceable, and displayable.",
+      "acceptanceCriteria": [
+        "New AgentIteration model in backend/app/models/ with fields: id (UUID), task_id (FK), action_id (FK), iteration_number (int, 1-based), loop_type (primary/retry), attempt_number (int, 0 for primary), reasoning (text), tool_calls (JSON array), outcome (continue/completed/failed/paused/user_redirected), error (text nullable), lessons_learned (text nullable), created_at (timestamp), duration_ms (int)",
+        "Table created via init_db alongside existing tables",
+        "Index on (task_id, iteration_number) for fast queries",
+        "Model imported and registered in backend/app/models/__init__.py",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add iterations API endpoint",
+      "description": "As a developer, I need an API endpoint to fetch iteration history for a task so the frontend can display it.",
+      "acceptanceCriteria": [
+        "GET /actions/{action_id}/tasks/{task_id}/iterations returns list of AgentIteration records ordered by iteration_number",
+        "Response includes all fields from the model as JSON",
+        "Returns empty list if no iterations exist for the task",
+        "Endpoint registered in tasks router",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Extend Task model with workspace fields",
+      "description": "As a developer, I need workspace_path and workspace_branch fields on the Task model so coding tasks can track their git worktree.",
+      "acceptanceCriteria": [
+        "Task model in backend/app/models/task.py has new nullable fields: workspace_path (string) and workspace_branch (string)",
+        "Fields included in Task API response schema",
+        "Existing tasks unaffected (fields default to None)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement git worktree manager service",
+      "description": "As a developer, I need a service that creates and manages git worktrees so coding tasks run in isolated workspaces.",
+      "acceptanceCriteria": [
+        "New backend/app/services/worktree_manager.py with functions: create_worktree(task_id, repo_path) -> (worktree_path, branch_name), remove_worktree(worktree_path), list_worktrees(repo_path)",
+        "Worktrees created at {repo_path}/.workdeck/worktrees/{task_id}/ with branch workdeck/task-{task_id_short}",
+        "Uses subprocess to run git worktree add/remove commands",
+        "WORKDECK_REPO_PATH env var configures the target repository path",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement coding agent tool functions",
+      "description": "As a developer, I need standalone tool functions (read_file, write_file, edit_file, glob, grep, bash) that the coding agent will call, all sandboxed to a workspace directory.",
+      "acceptanceCriteria": [
+        "New backend/app/services/agents/coding_tools.py with functions: read_file(path, workspace) -> str, write_file(path, content, workspace) -> str, edit_file(path, old_str, new_str, workspace) -> str (returns unified diff), glob_search(pattern, workspace) -> list[str], grep_search(pattern, workspace, glob_filter=None) -> list[dict], bash_run(command, workspace, timeout=120) -> dict(stdout, stderr, exit_code)",
+        "All path-accepting functions validate that resolved path is within workspace directory (raise error if escape attempted)",
+        "edit_file computes and returns a unified diff of the change",
+        "bash_run executes commands with cwd set to workspace directory",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement coding agent with agentic loop",
+      "description": "As a developer, I need a coding agent that runs an LLM-driven agentic loop (plan, execute tools, evaluate, decide) inside a git worktree to solve programming tasks.",
+      "acceptanceCriteria": [
+        "New backend/app/services/agents/coding_agent.py extending BaseAgent",
+        "execute() method: creates worktree via worktree_manager, runs agentic loop, cleans up on failure",
+        "Agentic loop: sends conversation history + tool definitions to LLM, executes returned tool calls, appends results, repeats until LLM returns done/fail or max_iterations (50) reached",
+        "Tool definitions provided to LLM as function schemas for: read_file, write_file, edit_file, glob, grep, bash",
+        "Each iteration creates an AgentIteration record in the database with reasoning, tool_calls (input+output+duration+success), and outcome",
+        "On completion: stores workspace_path and workspace_branch on Task, generates summary as TaskOutput",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Register coding agent type in registry and planner",
+      "description": "As a user, I want the planner to assign coding agent type to programming tasks so they are handled by the coding agent.",
+      "acceptanceCriteria": [
+        "coding agent registered in agent registry (backend/app/services/agents/registry.py) as a builtin agent",
+        "AgentDefinition seeded in database at startup with is_builtin=True, agent_type='coding'",
+        "Planner system prompt updated with coding agent description: use for tasks involving file creation/editing, code writing, debugging, testing, refactoring in a repository",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add iteration SSE events to event bus",
+      "description": "As a developer, I need new SSE event types for iteration lifecycle so the frontend can display real-time agent activity.",
+      "acceptanceCriteria": [
+        "New event types published via event_bus: iteration.started (task_id, iteration_number, loop_type, attempt_number), iteration.reasoning (task_id, iteration_number, reasoning), iteration.tool_call (task_id, iteration_number, tool, input_summary), iteration.tool_result (task_id, iteration_number, tool, output_summary, success, duration_ms), iteration.completed (task_id, iteration_number, outcome), iteration.file_diff (task_id, iteration_number, file_path, diff), iteration.terminal (task_id, iteration_number, command, stdout, stderr, exit_code)",
+        "Coding agent publishes these events during its agentic loop as they happen (not batched)",
+        "Events included in SSE stream at GET /actions/{id}/events",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Add executor-level retry loop with history injection",
+      "description": "As a developer, I want the executor to wrap every agent's execute() call in a retry loop so that on first failure, the agent is re-invoked with history of what failed.",
+      "acceptanceCriteria": [
+        "In executor.py _run_task(), on agent failure: enter retry loop (up to max_retry_iterations, default 3)",
+        "Each retry re-calls agent.execute() with augmented prompt containing structured failure history: iteration N, tried X, failed because Y",
+        "AgentIteration records created for both primary attempt (attempt_number=0) and each retry (attempt_number=1,2,3) with loop_type='retry'",
+        "If all retries exhausted, mark task as failed with full iteration history preserved",
+        "Existing inline recovery sub-action code in executor.py removed and replaced by this mechanism",
+        "SSE events published: task.retry_loop.started, task.retry_loop.iteration, task.retry_loop.exhausted",
+        "All existing agents work without modification",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add pause/resume API endpoints for tasks",
+      "description": "As a developer, I need backend endpoints to pause and resume a running task so users can intervene mid-execution.",
+      "acceptanceCriteria": [
+        "POST /actions/{action_id}/tasks/{task_id}/pause sets a pause signal for the task (e.g., in-memory dict or DB flag)",
+        "POST /actions/{action_id}/tasks/{task_id}/resume clears the pause signal and accepts optional guidance text in request body",
+        "Coding agent checks pause signal between iterations; if paused, saves current state, sets task status to 'paused', and stops the loop",
+        "When resumed with guidance, guidance stored as AgentIteration record with outcome='user_guidance' and injected into next LLM call",
+        "SSE events: task.paused, task.resumed, task.user_guidance",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Add coding agent completion artifacts",
+      "description": "As a user, I want the coding agent to produce a git diff artifact and change summary when it completes so I can review the work.",
+      "acceptanceCriteria": [
+        "On completion, coding agent generates unified diff of all changes on worktree branch via git diff HEAD~N or git diff main...branch",
+        "Diff stored as Artifact with type='file', mime_type='text/x-diff'",
+        "TaskOutput.text contains summary: files changed, tests status, branch name",
+        "Task output_summary shows: 'Modified N files on branch workdeck/task-{id}. Tests passing/failing.'",
+        "workspace_branch stored in Task metadata for user reference",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Add AgentIteration TypeScript type and API hook",
+      "description": "As a frontend developer, I need TypeScript types and a React Query hook for fetching iteration history so UI components can consume iteration data.",
+      "acceptanceCriteria": [
+        "AgentIteration type added to frontend/src/types/index.ts with all fields matching backend model",
+        "New hook useTaskIterations(actionId, taskId) in frontend/src/hooks/ that fetches GET /actions/{actionId}/tasks/{taskId}/iterations via React Query",
+        "Hook supports refetch interval (polling every 2s when task is running)",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add iteration SSE events to Zustand store",
+      "description": "As a frontend developer, I need the Zustand store to handle iteration SSE events so iteration data updates in real time without polling.",
+      "acceptanceCriteria": [
+        "useActionStore extended with: taskIterations (map of task_id -> AgentIteration[]), currentIteration (map of task_id -> {iteration_number, reasoning, tool, status})",
+        "useActionEvents hook handles new event types: iteration.started, iteration.reasoning, iteration.tool_call, iteration.tool_result, iteration.completed, iteration.file_diff, iteration.terminal",
+        "Events update taskIterations and currentIteration state in real time",
+        "Retry loop events (task.retry_loop.*) update a retryStatus map (task_id -> {attempt, max_attempts})",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Build iteration summary panel on task card",
+      "description": "As a user, I want to see a curated summary of agent progress on each task card showing current iteration, latest action, and retry status.",
+      "acceptanceCriteria": [
+        "New IterationSummary component rendered inside TaskCard when task has iterations",
+        "Shows: current status line (e.g., 'Iteration 3/50 - editing src/utils.ts' or 'Completed in 12 iterations')",
+        "Shows progress bar or iteration count indicator",
+        "Shows latest action one-liner (e.g., 'Ran tests - 3 passed, 1 failed')",
+        "When in retry loop: shows 'Retry 2/3 - trying alternative approach'",
+        "Reads from Zustand store (currentIteration and retryStatus)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Build expandable iteration timeline component",
+      "description": "As a user, I want an expandable timeline below the task summary showing every iteration with tool icons, one-line summaries, and success/fail badges.",
+      "acceptanceCriteria": [
+        "New IterationTimeline component rendered below IterationSummary, collapsed by default with expand/collapse toggle",
+        "Each iteration row shows: #N, tool icon(s), one-line summary, success/fail badge (green check or red X), duration",
+        "Clicking a row expands it to show: full reasoning text, list of tool calls with inputs and outputs",
+        "Failed iterations highlighted with red left border, successful with green",
+        "Retry loop iterations visually grouped with 'Primary Attempt' and 'Retry Attempt N' section headers",
+        "Timeline auto-scrolls to latest iteration when task is running",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Build file diff viewer component",
+      "description": "As a user, I want to see file changes as a visual diff when expanding an edit_file tool call in the iteration timeline.",
+      "acceptanceCriteria": [
+        "New DiffViewer component that renders unified diff with syntax highlighting",
+        "Added lines shown in green background, removed lines in red background, context lines in gray",
+        "File path displayed as header above the diff",
+        "Rendered inside expanded iteration detail when tool is edit_file or write_file",
+        "Install and use a lightweight diff rendering library (react-diff-viewer-continued or diff2html)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Build terminal output viewer component",
+      "description": "As a user, I want to see shell command output in a terminal-like display when expanding a bash tool call in the iteration timeline.",
+      "acceptanceCriteria": [
+        "New TerminalViewer component with dark background, monospace font",
+        "Shows command as prompt line (e.g., '$ npm test')",
+        "stdout in white/light text, stderr in red/orange text",
+        "Exit code indicator: green checkmark for 0, red X for non-zero",
+        "Max-height container with scrollbar for long output",
+        "Rendered inside expanded iteration detail when tool is bash",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Build pause/guidance UI on task cards",
+      "description": "As a user, I want a pause button on running tasks and a guidance text input when paused so I can intervene and redirect the agent.",
+      "acceptanceCriteria": [
+        "Pause button (icon) visible on task cards when task status is 'running'",
+        "Clicking Pause calls POST /actions/{actionId}/tasks/{taskId}/pause and UI updates to show 'paused' status",
+        "When paused, a text input area appears: 'Provide guidance to the agent...' with a Submit + Resume button",
+        "Submitting guidance calls POST /actions/{actionId}/tasks/{taskId}/resume with guidance text in body",
+        "A 'Redirect' option allows replacing the remaining plan with new instructions (same resume endpoint with redirect flag)",
+        "SSE events task.paused, task.resumed update task status in Zustand store",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add iteration history retention and cleanup",
+      "description": "As a developer, I need a background job that prunes old iteration records to prevent unbounded database growth.",
+      "acceptanceCriteria": [
+        "Configurable retention via env var ITERATION_RETENTION_DAYS (default 30)",
+        "Cleanup function deletes AgentIteration records older than retention period for completed actions",
+        "Cleanup runs on server startup and every 24 hours via asyncio background task",
+        "Task, TaskOutput, and Artifact records are not affected by cleanup",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

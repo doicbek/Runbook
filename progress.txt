@@ -1,0 +1,24 @@
+## Codebase Patterns
+- Models use SQLAlchemy `DeclarativeBase` with `Mapped` type annotations and UUID string PKs
+- No Alembic migrations — new tables auto-created by `Base.metadata.create_all()`, new columns added via idempotent `ALTER TABLE` in `init_db()`
+- All models must be imported in `init_db()` (database.py) AND exported from `models/__init__.py`
+- Use `IF NOT EXISTS` pattern (try/except) for column migrations in `init_db()`
+- JSON columns use `sqlalchemy.JSON` with `default=list` or `default=dict`
+- Timestamps use `DateTime` with `default=lambda: datetime.now(timezone.utc)`
+- Run `python -m py_compile` from `backend/` dir for quick typecheck; use `python -c "from app.models.X import Y"` to verify imports
+- Git operations must be run from repo root `/mnt/c/Users/dobec/actions/`
+- Backend Python runs from `/mnt/c/Users/dobec/actions/backend/`
+
+---
+
+## 2026-02-26 - US-001
+- Implemented AgentIteration model in `backend/app/models/agent_iteration.py`
+- Fields: id, task_id (FK), action_id (FK), iteration_number, loop_type, attempt_number, reasoning, tool_calls (JSON), outcome, error, lessons_learned, created_at, duration_ms
+- Added composite index on (task_id, iteration_number)
+- Registered in `models/__init__.py` and `database.py` init_db imports
+- Files changed: `backend/app/models/agent_iteration.py` (new), `backend/app/models/__init__.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - Model file pattern: import uuid, datetime; import SA types; import Base from app.database; define class extending Base
+  - The `__table_args__` tuple is used for composite indexes
+  - py_compile works for basic syntax/import checking; runtime import test catches SQLAlchemy issues
+---
