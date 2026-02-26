@@ -22,6 +22,7 @@ from app.services.agents.coding_tools import (
     read_file,
     write_file,
 )
+from app.services.event_bus import event_bus
 from app.services.llm_client import MODEL_REGISTRY, get_default_model_for_agent
 from app.services.worktree_manager import create_worktree, remove_worktree
 
@@ -317,6 +318,13 @@ class CodingAgent(BaseAgent):
             if log_callback:
                 await log_callback("info", f"Iteration {iteration}/{MAX_ITERATIONS}")
 
+            await event_bus.publish(action_id, "iteration.started", {
+                "task_id": task_id,
+                "iteration_number": iteration,
+                "loop_type": "primary",
+                "attempt_number": 0,
+            })
+
             # Call LLM with tools
             try:
                 response_message = await self._call_llm_with_tools(
@@ -339,6 +347,13 @@ class CodingAgent(BaseAgent):
             # Extract reasoning (text content before/alongside tool calls)
             reasoning = response_message.get("content") or ""
 
+            if reasoning:
+                await event_bus.publish(action_id, "iteration.reasoning", {
+                    "task_id": task_id,
+                    "iteration_number": iteration,
+                    "reasoning": _truncate(reasoning, 2000),
+                })
+
             # Check for tool calls
             tool_calls = response_message.get("tool_calls") or []
 
@@ -359,6 +374,11 @@ class CodingAgent(BaseAgent):
                     outcome="continue",
                     duration_ms=int((time.time() - iter_start) * 1000),
                 )
+                await event_bus.publish(action_id, "iteration.completed", {
+                    "task_id": task_id,
+                    "iteration_number": iteration,
+                    "outcome": "continue",
+                })
                 continue
 
             # Execute tool calls
@@ -375,9 +395,17 @@ class CodingAgent(BaseAgent):
 
                 tc_start = time.time()
 
+                input_summary = _truncate(json.dumps(tool_args), 200)
+
                 if log_callback:
-                    input_summary = _truncate(json.dumps(tool_args), 200)
                     await log_callback("info", f"Tool: {tool_name}({input_summary})")
+
+                await event_bus.publish(action_id, "iteration.tool_call", {
+                    "task_id": task_id,
+                    "iteration_number": iteration,
+                    "tool": tool_name,
+                    "input_summary": input_summary,
+                })
 
                 # Check for terminal tools
                 if tool_name == "done":
@@ -446,6 +474,37 @@ class CodingAgent(BaseAgent):
                 if log_callback:
                     status = "OK" if success else "FAILED"
                     await log_callback("info", f"  → {status} ({tc_duration}ms)")
+
+                await event_bus.publish(action_id, "iteration.tool_result", {
+                    "task_id": task_id,
+                    "iteration_number": iteration,
+                    "tool": tool_name,
+                    "output_summary": _truncate(output_str, 500),
+                    "success": success,
+                    "duration_ms": tc_duration,
+                })
+
+                # Emit specialized events for file diffs and terminal output
+                if tool_name in ("edit_file", "write_file") and success:
+                    file_path = tool_args.get("path", "")
+                    diff_text = output_str if tool_name == "edit_file" else f"Wrote file: {file_path}"
+                    await event_bus.publish(action_id, "iteration.file_diff", {
+                        "task_id": task_id,
+                        "iteration_number": iteration,
+                        "file_path": file_path,
+                        "diff": _truncate(diff_text, 5000),
+                    })
+
+                if tool_name == "bash":
+                    bash_result = output if isinstance(output, dict) else {}
+                    await event_bus.publish(action_id, "iteration.terminal", {
+                        "task_id": task_id,
+                        "iteration_number": iteration,
+                        "command": tool_args.get("command", ""),
+                        "stdout": _truncate(bash_result.get("stdout", "") if success else "", 2000),
+                        "stderr": _truncate(bash_result.get("stderr", "") if success else output_str, 2000),
+                        "exit_code": bash_result.get("exit_code", -1) if success else -1,
+                    })
 
                 # Add tool result to messages
                 messages.append({
