@@ -22,3 +22,15 @@
   - The `__table_args__` tuple is used for composite indexes
   - py_compile works for basic syntax/import checking; runtime import test catches SQLAlchemy issues
 ---
+
+## 2026-02-26 - US-002
+- Added `GET /actions/{action_id}/tasks/{task_id}/iterations` endpoint to tasks router
+- Created `AgentIterationResponse` Pydantic schema with all fields matching the model
+- Endpoint returns iterations ordered by `iteration_number`, empty list if none exist
+- Validates task exists and belongs to action (404 if not found)
+- Files changed: `backend/app/routers/tasks.py`, `backend/app/schemas/task.py`
+- **Learnings for future iterations:**
+  - Schema pattern: add Pydantic response models to `backend/app/schemas/task.py` with `model_config = {"from_attributes": True}` for ORM compat
+  - Router pattern: import models from `app.models` (which re-exports from submodules); import schemas from `app.schemas.task`
+  - Existing endpoint patterns: validate parent entity exists first, use `select().where().order_by()`, return `scalars().all()`
+---
