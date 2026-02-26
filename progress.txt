@@ -23,6 +23,16 @@
   - py_compile works for basic syntax/import checking; runtime import test catches SQLAlchemy issues
 ---
 
+## 2026-02-26 - US-003
+- Added `workspace_path` (Text, nullable) and `workspace_branch` (String(200), nullable) fields to Task model
+- Added both fields to `TaskResponse` Pydantic schema so they appear in API responses
+- Added idempotent `ALTER TABLE` migrations in `init_db()` for existing databases
+- Files changed: `backend/app/models/task.py`, `backend/app/schemas/task.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - Adding new nullable columns is straightforward: add `Mapped[str | None]` to model, add field to response schema, add ALTER TABLE to init_db
+  - Existing tasks unaffected since fields default to None
+---
+
 ## 2026-02-26 - US-002
 - Added `GET /actions/{action_id}/tasks/{task_id}/iterations` endpoint to tasks router
 - Created `AgentIterationResponse` Pydantic schema with all fields matching the model
