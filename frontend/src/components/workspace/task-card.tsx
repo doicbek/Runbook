@@ -16,6 +16,7 @@ import type { Artifact, CodeExecutionState, Task } from "@/types";
 import { TaskCardEditor } from "./task-card-editor";
 import { TaskLogsDrawer } from "./task-logs-drawer";
 import { IterationSummary } from "./iteration-summary";
+import { IterationTimeline } from "./iteration-timeline";
 
 const remarkPlugins = [remarkMath];
 const rehypePlugins = [rehypeKatex];
@@ -204,6 +205,9 @@ export function TaskCard({
 
         {/* Iteration summary — shows agent iteration progress */}
         <IterationSummary taskId={task.id} />
+
+        {/* Iteration timeline — expandable detail view of all iterations */}
+        <IterationTimeline taskId={task.id} />
 
         {/* Output section - inline expand/collapse */}
         {hasOutput && (
