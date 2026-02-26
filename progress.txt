@@ -106,3 +106,32 @@
   - OpenAI newer models (gpt-5, o-series) use `max_completion_tokens` and don't support temperature
   - Tool output truncation prevents context window overflow — use `_truncate()` helper
 ---
+
+## 2026-02-26 - US-008
+- Added iteration SSE events to the coding agent's agentic loop
+- 7 event types: iteration.started, iteration.reasoning, iteration.tool_call, iteration.tool_result, iteration.completed, iteration.file_diff, iteration.terminal
+- Events published in real-time (not batched) as they happen during the loop
+- SSE endpoint at GET /actions/{id}/events already forwards all event bus events transparently
+- Files changed: `backend/app/services/agents/coding_agent.py`
+- **Learnings for future iterations:**
+  - The SSE endpoint is generic — it forwards any event type from the event bus, so no changes needed to add new event types
+  - Event data should be truncated to prevent oversized SSE payloads (reasoning: 2000 chars, output_summary: 500 chars, diff: 5000 chars, terminal: 2000 chars)
+  - The event_bus.publish() is async but non-blocking (uses put_nowait), so it won't slow down the agent loop
+---
+
+## 2026-02-26 - US-009
+- Replaced inline recovery sub-action mechanism with executor-level retry loop in `_run_task()`
+- On primary agent failure, enters retry loop (up to `_MAX_RETRY_ITERATIONS=3`) that re-calls `agent.execute()` with augmented prompt containing structured failure history
+- `_build_failure_history()` helper constructs failure context block injected before the effective prompt
+- AgentIteration records created for both primary attempt (attempt_number=0, loop_type='primary') and each retry (attempt_number=1-3, loop_type='retry')
+- 3 new SSE event types: `task.retry_loop.started`, `task.retry_loop.iteration`, `task.retry_loop.exhausted`
+- Removed `_spawn_recovery_sub_action` function and `_MAX_INLINE_RECOVERY` constant
+- Outer DAG recovery (`_attempt_recovery`, `_full_replan`) preserved as safety net
+- All existing agents work without modification — retry uses same `get_agent_async()` + `agent.execute()` interface
+- Files changed: `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - The retry loop approach is simpler than sub-action recovery: same agent, same interface, just augmented prompt
+  - `time.monotonic()` is better than `time.time()` for measuring durations (not affected by clock changes)
+  - `_transform_to_acquisition` is now dead code (was only used indirectly via old recovery path) — can be cleaned up later
+  - AgentIteration records from executor have empty tool_calls (detailed iterations are created by agents like CodingAgent internally)
+---

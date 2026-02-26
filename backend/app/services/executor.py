@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import Action, Artifact, Log, Task, TaskOutput
+from app.models.agent_iteration import AgentIteration
 from app.services.agents.exceptions import InputUnavailableError
 from app.services.agents.registry import get_agent_async
 from app.services.event_bus import event_bus
@@ -18,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Track running executors per action for cancellation
 _running_executors: dict[str, asyncio.Task] = {}
 
-# Maximum number of inline recovery sub-actions per task before giving up
-_MAX_INLINE_RECOVERY = 3
+# Maximum number of retry iterations per task before giving up
+_MAX_RETRY_ITERATIONS = 3
 
 
 async def invalidate_downstream(
@@ -567,74 +569,18 @@ async def _gather_dep_outputs(dependency_ids: list[str]) -> dict[str, str]:
     return dep_outputs
 
 
-async def _spawn_recovery_sub_action(
-    action_id: str,
-    task_id: str,
-    original_prompt: str,
-    original_agent_type: str,
-    error_message: str,
-    attempt: int,
-    prior_attempts: list[str],
-    dep_outputs: dict[str, str],
-    log_callback,
-) -> dict | None:
-    """Spawn a recovery sub-action that plans and executes a fix for the error.
 
-    Returns the sub-action agent's result dict on success, or None on failure.
-    """
-    from app.services.agents.sub_action_agent import SubActionAgent
-
-    prior_context = ""
-    if prior_attempts:
-        prior_context = (
-            "\n\nPrevious recovery attempts that also failed:\n"
-            + "\n".join(f"  Attempt {i+1}: {msg}" for i, msg in enumerate(prior_attempts))
-            + "\n\nDo NOT repeat any of these approaches. Try something fundamentally different."
-        )
-
-    recovery_prompt = (
-        f"[ERROR RECOVERY — Attempt {attempt}]\n\n"
-        f"A task in a workflow has failed and needs to be fixed.\n\n"
-        f"Original task goal: {original_prompt}\n"
-        f"Agent type that failed: {original_agent_type}\n"
-        f"Error message:\n{error_message[:800]}\n"
-        f"{prior_context}\n\n"
-        f"Your mission: Achieve the SAME goal as the original task, but work around "
-        f"the error. Plan multiple steps if needed:\n"
-        f"1. Diagnose why the error occurred\n"
-        f"2. Use an alternative approach, different data source, or different method\n"
-        f"3. Produce the output that the original task was supposed to produce\n\n"
-        f"The downstream workflow depends on your output — it must fulfill the same "
-        f"contract as the original task."
-    )
-
-    if log_callback:
-        await log_callback(
-            "info",
-            f"Spawning recovery sub-action (attempt {attempt}/{_MAX_INLINE_RECOVERY}): "
-            f"{error_message[:100]}",
-        )
-
-    await event_bus.publish(action_id, "task.recovering", {
-        "task_id": task_id,
-        "attempt": attempt,
-        "max_attempts": _MAX_INLINE_RECOVERY,
-        "error": error_message[:200],
-    })
-
-    try:
-        agent = SubActionAgent()
-        result = await agent.execute(
-            task_id, recovery_prompt, dep_outputs, log_callback
-        )
-        return result
-    except Exception as recovery_err:
-        if log_callback:
-            await log_callback(
-                "error",
-                f"Recovery sub-action attempt {attempt} failed: {recovery_err}",
-            )
-        return None
+def _build_failure_history(failures: list[dict]) -> str:
+    """Build a structured failure history string for injection into retry prompts."""
+    lines = ["[FAILURE HISTORY — Previous attempts failed. Use this to avoid repeating mistakes.]\n"]
+    for f in failures:
+        lines.append(f"  Attempt {f['attempt']} (loop_type={f['loop_type']}):")
+        lines.append(f"    Error: {f['error'][:400]}")
+        if f.get("summary"):
+            lines.append(f"    What was tried: {f['summary'][:300]}")
+        lines.append("")
+    lines.append("Do NOT repeat these approaches. Try a fundamentally different strategy.\n")
+    return "\n".join(lines)
 
 
 async def _run_task(
@@ -647,8 +593,9 @@ async def _run_task(
 ):
     """Run a single task with the appropriate agent.
 
-    On failure, iteratively spawns recovery sub-actions that plan and execute
-    a fix for the specific error before marking the task as truly failed.
+    On failure, enters a retry loop that re-invokes the same agent with
+    augmented prompt containing structured failure history. Creates
+    AgentIteration records for each retry attempt.
     """
     await event_bus.publish(action_id, "task.started", {
         "task_id": task_id,
@@ -694,7 +641,8 @@ async def _run_task(
     # Gather dependency outputs once (shared across retries)
     dep_outputs = await _gather_dep_outputs(dependency_ids)
 
-    # ── Primary execution attempt ────────────────────────────────────────
+    # ── Primary execution attempt (attempt_number=0) ─────────────────────
+    start_ms = time.monotonic()
     try:
         async with async_session() as db:
             agent = await get_agent_async(agent_type, db)
@@ -719,55 +667,134 @@ async def _run_task(
         except Exception:
             pass
 
-    # ── Iterative recovery via sub-actions ────────────────────────────────
-    # The primary agent failed. Instead of marking the task as failed and
-    # blocking downstream, spawn recovery sub-actions that plan and execute
-    # a fix for the specific error.
-    await log_callback("warn", f"Primary agent failed: {first_error[:200]}")
-    await log_callback("info", "Starting automatic recovery via sub-action...")
+    primary_duration = int((time.monotonic() - start_ms) * 1000)
 
-    prior_attempts: list[str] = []
-    last_error = first_error
-
-    for attempt_num in range(1, _MAX_INLINE_RECOVERY + 1):
-        recovery_result = await _spawn_recovery_sub_action(
-            action_id=action_id,
+    # Record primary attempt failure as an AgentIteration
+    async with async_session() as db:
+        iteration = AgentIteration(
             task_id=task_id,
-            original_prompt=prompt,
-            original_agent_type=agent_type,
-            error_message=last_error,
-            attempt=attempt_num,
-            prior_attempts=prior_attempts,
-            dep_outputs=dep_outputs,
-            log_callback=log_callback,
+            action_id=action_id,
+            iteration_number=1,
+            loop_type="primary",
+            attempt_number=0,
+            reasoning=f"Primary execution of {agent_type} agent",
+            tool_calls=[],
+            outcome="failed",
+            error=first_error[:2000],
+            duration_ms=primary_duration,
+        )
+        db.add(iteration)
+        await db.commit()
+
+    # ── Retry loop — re-invoke same agent with failure history ────────────
+    await log_callback("warn", f"Primary agent failed: {first_error[:200]}")
+    await log_callback("info", f"Starting retry loop (up to {_MAX_RETRY_ITERATIONS} retries)...")
+
+    await event_bus.publish(action_id, "task.retry_loop.started", {
+        "task_id": task_id,
+        "max_attempts": _MAX_RETRY_ITERATIONS,
+        "original_error": first_error[:300],
+    })
+
+    failure_history: list[dict] = [
+        {"attempt": 0, "loop_type": "primary", "error": first_error, "summary": None},
+    ]
+
+    for retry_num in range(1, _MAX_RETRY_ITERATIONS + 1):
+        await event_bus.publish(action_id, "task.retry_loop.iteration", {
+            "task_id": task_id,
+            "attempt": retry_num,
+            "max_attempts": _MAX_RETRY_ITERATIONS,
+        })
+        await log_callback(
+            "info",
+            f"Retry {retry_num}/{_MAX_RETRY_ITERATIONS}: re-invoking {agent_type} agent with failure context",
         )
 
-        if recovery_result is not None:
-            # Recovery succeeded — use its output for this task
-            await log_callback(
-                "info",
-                f"Recovery succeeded on attempt {attempt_num}",
+        # Build augmented prompt with structured failure history
+        history_block = _build_failure_history(failure_history)
+        retry_prompt = f"{history_block}\n{effective_prompt}"
+
+        retry_start = time.monotonic()
+        retry_error: str | None = None
+        try:
+            async with async_session() as db:
+                agent = await get_agent_async(agent_type, db)
+            result = await agent.execute(
+                task_id, retry_prompt, dep_outputs, log_callback, model=model
             )
-            await _save_task_success(action_id, task_id, recovery_result)
+
+            retry_duration = int((time.monotonic() - retry_start) * 1000)
+
+            # Record successful retry iteration
+            async with async_session() as db:
+                iteration = AgentIteration(
+                    task_id=task_id,
+                    action_id=action_id,
+                    iteration_number=retry_num + 1,  # 1-based, primary was 1
+                    loop_type="retry",
+                    attempt_number=retry_num,
+                    reasoning=f"Retry {retry_num}: re-invoked {agent_type} with failure history",
+                    tool_calls=[],
+                    outcome="completed",
+                    duration_ms=retry_duration,
+                )
+                db.add(iteration)
+                await db.commit()
+
+            await log_callback("info", f"Retry {retry_num} succeeded!")
+            await _save_task_success(action_id, task_id, result)
             return
 
-        # Recovery sub-action also failed — record and try again
-        attempt_desc = f"Recovery attempt {attempt_num} also failed"
-        prior_attempts.append(f"{attempt_desc}: {last_error[:200]}")
-        last_error = f"Recovery sub-action attempt {attempt_num} failed"
-
-        if attempt_num < _MAX_INLINE_RECOVERY:
-            await log_callback(
-                "warn",
-                f"Recovery attempt {attempt_num} failed, trying again "
-                f"({attempt_num}/{_MAX_INLINE_RECOVERY})...",
+        except Exception as e:
+            retry_error = str(e)
+            retry_duration = int((time.monotonic() - retry_start) * 1000)
+            logger.warning(
+                f"Task {task_id} retry {retry_num} failed: {retry_error[:200]}"
             )
 
-    # ── All recovery attempts exhausted — mark as truly failed ───────────
+        # Record failed retry iteration
+        async with async_session() as db:
+            iteration = AgentIteration(
+                task_id=task_id,
+                action_id=action_id,
+                iteration_number=retry_num + 1,
+                loop_type="retry",
+                attempt_number=retry_num,
+                reasoning=f"Retry {retry_num}: re-invoked {agent_type} with failure history",
+                tool_calls=[],
+                outcome="failed",
+                error=(retry_error or "Unknown error")[:2000],
+                duration_ms=retry_duration,
+            )
+            db.add(iteration)
+            await db.commit()
+
+        failure_history.append({
+            "attempt": retry_num,
+            "loop_type": "retry",
+            "error": retry_error or "Unknown error",
+            "summary": f"Re-invoked {agent_type} agent with failure context",
+        })
+
+        if retry_num < _MAX_RETRY_ITERATIONS:
+            await log_callback(
+                "warn",
+                f"Retry {retry_num} failed, trying again "
+                f"({retry_num}/{_MAX_RETRY_ITERATIONS})...",
+            )
+
+    # ── All retries exhausted — mark as truly failed ─────────────────────
     await log_callback(
         "error",
-        f"All {_MAX_INLINE_RECOVERY} recovery attempts failed. Task is failed.",
+        f"All {_MAX_RETRY_ITERATIONS} retry attempts failed. Task is failed.",
     )
+
+    await event_bus.publish(action_id, "task.retry_loop.exhausted", {
+        "task_id": task_id,
+        "attempts": _MAX_RETRY_ITERATIONS,
+        "original_error": first_error[:300],
+    })
 
     async with async_session() as db:
         task_result = await db.execute(select(Task).where(Task.id == task_id))
@@ -775,14 +802,14 @@ async def _run_task(
         task.status = "failed"
         task.output_summary = (
             f"Original error: {first_error[:300]}\n\n"
-            f"Recovery exhausted after {_MAX_INLINE_RECOVERY} attempts."
+            f"Retry loop exhausted after {_MAX_RETRY_ITERATIONS} attempts."
         )
         await db.commit()
 
     await event_bus.publish(action_id, "task.failed", {
         "task_id": task_id,
         "error": first_error[:300],
-        "recovery_attempts": _MAX_INLINE_RECOVERY,
+        "retry_attempts": _MAX_RETRY_ITERATIONS,
     })
 
 
