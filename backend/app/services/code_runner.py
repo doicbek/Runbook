@@ -3,11 +3,205 @@ import logging
 import mimetypes
 import os
 import re
-import tempfile
+import sys
 from pathlib import Path
 from typing import Callable, Awaitable
 
 logger = logging.getLogger(__name__)
+
+# Map import names that differ from pip package names
+_PIP_NAME_MAP: dict[str, str] = {
+    "sklearn": "scikit-learn",
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+    "dotenv": "python-dotenv",
+    "skimage": "scikit-image",
+    "Crypto": "pycryptodome",
+    "serial": "pyserial",
+    "usaddress": "usaddress",
+    "attr": "attrs",
+    "dateutil": "python-dateutil",
+    "gi": "PyGObject",
+    "lxml": "lxml",
+    "wx": "wxPython",
+    "google": "google-api-python-client",
+    "googleapiclient": "google-api-python-client",
+    "Bio": "biopython",
+    "cv": "opencv-python",
+    "fitz": "PyMuPDF",
+    "magic": "python-magic",
+    "docx": "python-docx",
+    "pptx": "python-pptx",
+    "jose": "python-jose",
+    "jwt": "PyJWT",
+    "Levenshtein": "python-Levenshtein",
+    "rapidfuzz": "rapidfuzz",
+    "geopy": "geopy",
+    "shapely": "shapely",
+    "geopandas": "geopandas",
+    "fiona": "fiona",
+    "rasterio": "rasterio",
+    "netCDF4": "netCDF4",
+    "xarray": "xarray",
+    "dask": "dask",
+    "tables": "tables",
+    "h5py": "h5py",
+    "astropy": "astropy",
+    "healpy": "healpy",
+    "statsmodels": "statsmodels",
+    "xgboost": "xgboost",
+    "lightgbm": "lightgbm",
+    "catboost": "catboost",
+    "tf": "tensorflow",
+    "tensorflow": "tensorflow",
+    "torch": "torch",
+    "transformers": "transformers",
+    "langchain": "langchain",
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "tiktoken": "tiktoken",
+    "faiss": "faiss-cpu",
+    "chromadb": "chromadb",
+    "pinecone": "pinecone-client",
+    "weaviate": "weaviate-client",
+    "redis": "redis",
+    "pymongo": "pymongo",
+    "psycopg2": "psycopg2-binary",
+    "MySQLdb": "mysqlclient",
+    "pymysql": "pymysql",
+    "sqlmodel": "sqlmodel",
+    "pydantic": "pydantic",
+    "fastapi": "fastapi",
+    "flask": "flask",
+    "starlette": "starlette",
+    "httpx": "httpx",
+    "aiohttp": "aiohttp",
+    "websockets": "websockets",
+    "paramiko": "paramiko",
+    "fabric": "fabric",
+}
+
+# Maximum number of install-then-retry cycles
+_MAX_INSTALL_RETRIES = 3
+
+
+def _extract_missing_modules(stderr: str) -> list[str]:
+    """Return pip package names for any ModuleNotFoundError / ImportError in stderr."""
+    pattern = re.compile(
+        r"(?:ModuleNotFoundError|ImportError):\s*No module named ['\"]?([^'\";\s]+)['\"]?",
+        re.IGNORECASE,
+    )
+    seen: list[str] = []
+    for match in pattern.finditer(stderr):
+        raw = match.group(1).strip().split(".")[0]  # top-level package only
+        pip_name = _PIP_NAME_MAP.get(raw, raw)
+        if pip_name not in seen:
+            seen.append(pip_name)
+    return seen
+
+
+# Standard library modules that should never be pip-installed
+_STDLIB_MODULES = {
+    "abc", "aifc", "argparse", "array", "ast", "asyncio", "atexit", "base64",
+    "binascii", "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb",
+    "chunk", "cmath", "cmd", "code", "codecs", "codeop", "collections",
+    "colorsys", "compileall", "concurrent", "configparser", "contextlib",
+    "contextvars", "copy", "copyreg", "cProfile", "csv", "ctypes", "curses",
+    "dataclasses", "datetime", "dbm", "decimal", "difflib", "dis", "distutils",
+    "doctest", "email", "encodings", "enum", "errno", "faulthandler", "fcntl",
+    "filecmp", "fileinput", "fnmatch", "fractions", "ftplib", "functools",
+    "gc", "getopt", "getpass", "gettext", "glob", "grp", "gzip", "hashlib",
+    "heapq", "hmac", "html", "http", "idlelib", "imaplib", "imghdr", "imp",
+    "importlib", "inspect", "io", "ipaddress", "itertools", "json", "keyword",
+    "lib2to3", "linecache", "locale", "logging", "lzma", "mailbox", "mailcap",
+    "marshal", "math", "mimetypes", "mmap", "modulefinder", "multiprocessing",
+    "netrc", "nis", "nntplib", "numbers", "operator", "optparse", "os",
+    "ossaudiodev", "pathlib", "pdb", "pickle", "pickletools", "pipes",
+    "pkgutil", "platform", "plistlib", "poplib", "posix", "posixpath",
+    "pprint", "profile", "pstats", "pty", "pwd", "py_compile", "pyclbr",
+    "pydoc", "queue", "quopri", "random", "re", "readline", "reprlib",
+    "resource", "rlcompleter", "runpy", "sched", "secrets", "select",
+    "selectors", "shelve", "shlex", "shutil", "signal", "site", "smtpd",
+    "smtplib", "sndhdr", "socket", "socketserver", "sqlite3", "ssl", "stat",
+    "statistics", "string", "stringprep", "struct", "subprocess", "sunau",
+    "symtable", "sys", "sysconfig", "syslog", "tabnanny", "tarfile", "telnetlib",
+    "tempfile", "termios", "test", "textwrap", "threading", "time", "timeit",
+    "tkinter", "token", "tokenize", "trace", "traceback", "tracemalloc",
+    "tty", "turtle", "turtledemo", "types", "typing", "unicodedata",
+    "unittest", "urllib", "uu", "uuid", "venv", "warnings", "wave",
+    "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib",
+    "xml", "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib",
+    "_thread", "__future__",
+}
+
+
+def _prescan_imports(code: str) -> list[str]:
+    """Pre-scan code for imports and # pip: hints. Return pip packages to install."""
+    packages: list[str] = []
+    seen: set[str] = set()
+
+    # Extract `# pip: package-name` comments
+    for match in re.finditer(r"#\s*pip:\s*(\S+)", code):
+        pkg = match.group(1).strip()
+        if pkg not in seen:
+            seen.add(pkg)
+            packages.append(pkg)
+
+    # Extract import statements
+    for match in re.finditer(
+        r"^\s*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)", code, re.MULTILINE
+    ):
+        mod = match.group(1)
+        if mod in _STDLIB_MODULES:
+            continue
+        pip_name = _PIP_NAME_MAP.get(mod, mod)
+        if pip_name not in seen:
+            seen.add(pip_name)
+            packages.append(pip_name)
+
+    return packages
+
+
+def _is_installed(package: str) -> bool:
+    """Check if a package is already importable."""
+    # Map pip names back to import names for checking
+    reverse_map = {v: k for k, v in _PIP_NAME_MAP.items()}
+    import_name = reverse_map.get(package, package).replace("-", "_")
+    try:
+        __import__(import_name)
+        return True
+    except ImportError:
+        return False
+
+
+async def _install_packages(
+    packages: list[str],
+    log_callback: Callable[[str, str], Awaitable[None]] | None,
+) -> bool:
+    """pip-install packages in the current venv. Returns True on success."""
+    if log_callback:
+        await log_callback("info", f"Auto-installing missing packages: {', '.join(packages)}")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", *packages,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, err_bytes = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode == 0:
+            if log_callback:
+                await log_callback("info", f"Installed: {', '.join(packages)}")
+            return True
+        err = err_bytes.decode("utf-8", errors="replace")
+        if log_callback:
+            await log_callback("error", f"pip install failed: {err[:300]}")
+        return False
+    except Exception as e:
+        if log_callback:
+            await log_callback("error", f"pip install error: {e}")
+        return False
 
 # Base directory for storing artifacts
 ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
@@ -66,6 +260,9 @@ ALLOWED_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".svg", ".gif",
     ".csv", ".json", ".html", ".txt",
     ".pdf", ".xlsx", ".md",
+    # Scientific data formats
+    ".fits", ".hdf5", ".h5", ".nc", ".npy", ".npz",
+    ".parquet", ".feather", ".pkl",
 }
 
 
@@ -80,6 +277,56 @@ def _detect_artifact_type(mime_type: str) -> str:
     if mime_type in ("text/markdown", "text/x-markdown"):
         return "markdown"
     return "file"
+
+
+async def _run_script(
+    script_path: Path,
+    work_dir: Path,
+    timeout: int,
+    log_callback: Callable[[str, str], Awaitable[None]] | None,
+) -> tuple[str, str, int]:
+    """Execute script_path in a subprocess. Returns (stdout, stderr, exit_code)."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script_path),
+            cwd=str(work_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            if log_callback:
+                await log_callback("error", f"Code execution timed out after {timeout}s")
+            return "", f"Execution timed out after {timeout} seconds", -1
+
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        exit_code = process.returncode or 0
+
+        if log_callback:
+            if stdout.strip():
+                for line in stdout.strip().split("\n")[:50]:
+                    await log_callback("info", line)
+            if stderr.strip():
+                for line in stderr.strip().split("\n")[:20]:
+                    await log_callback("error", line)
+            if exit_code == 0:
+                await log_callback("info", "Code execution completed successfully")
+            else:
+                await log_callback("error", f"Code exited with code {exit_code}")
+
+        return stdout, stderr, exit_code
+
+    except Exception as e:
+        if log_callback:
+            await log_callback("error", f"Execution error: {e}")
+        return "", str(e), -1
 
 
 async def run_code(
@@ -118,58 +365,35 @@ async def run_code(
     if log_callback:
         await log_callback("info", "Starting code execution...")
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "python3",
-            str(script_path),
-            cwd=str(work_dir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+    # Pre-scan code for imports and install missing packages before first run
+    prescanned = _prescan_imports(code)
+    to_install = [p for p in prescanned if not _is_installed(p)]
+    if to_install:
+        if log_callback:
+            await log_callback("info", f"Pre-installing {len(to_install)} package(s): {', '.join(to_install)}")
+        await _install_packages(to_install, log_callback)
 
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.communicate()
+    stdout, stderr, exit_code = await _run_script(script_path, work_dir, timeout, log_callback)
+
+    # Auto-install missing modules and retry (up to _MAX_INSTALL_RETRIES rounds
+    # to handle cascading dependencies, e.g., importing A which needs B)
+    already_installed: set[str] = set()
+    for _attempt in range(_MAX_INSTALL_RETRIES):
+        if exit_code == 0:
+            break
+        missing = _extract_missing_modules(stderr)
+        # Filter out packages we already tried
+        new_missing = [p for p in missing if p not in already_installed]
+        if not new_missing:
+            break
+        already_installed.update(new_missing)
+        installed = await _install_packages(new_missing, log_callback)
+        if installed:
             if log_callback:
-                await log_callback("error", f"Code execution timed out after {timeout}s")
-            return {
-                "stdout": "",
-                "stderr": f"Execution timed out after {timeout} seconds",
-                "exit_code": -1,
-                "files": [],
-            }
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
-        exit_code = process.returncode or 0
-
-        # Log output
-        if log_callback:
-            if stdout.strip():
-                for line in stdout.strip().split("\n")[:50]:  # Cap at 50 lines
-                    await log_callback("info", line)
-            if stderr.strip():
-                for line in stderr.strip().split("\n")[:20]:
-                    await log_callback("error", line)
-            if exit_code == 0:
-                await log_callback("info", "Code execution completed successfully")
-            else:
-                await log_callback("error", f"Code exited with code {exit_code}")
-
-    except Exception as e:
-        logger.exception(f"Failed to execute code for task {task_id}")
-        if log_callback:
-            await log_callback("error", f"Execution error: {e}")
-        return {
-            "stdout": "",
-            "stderr": str(e),
-            "exit_code": -1,
-            "files": [],
-        }
+                await log_callback("info", f"Retrying after installing: {', '.join(new_missing)}")
+            stdout, stderr, exit_code = await _run_script(
+                script_path, work_dir, timeout, log_callback
+            )
 
     # Scan for generated files
     files = []

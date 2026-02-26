@@ -17,7 +17,10 @@ import {
 } from "@/hooks/use-agent-definitions";
 import { useAvailableModels } from "@/hooks/use-models";
 
-const REAL_BUILTINS = new Set(["arxiv_search", "code_execution"]);
+const REAL_BUILTINS = new Set([
+  "arxiv_search", "code_execution", "data_retrieval",
+  "spreadsheet", "report", "general", "sub_action",
+]);
 
 const statusColors: Record<string, string> = {
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",

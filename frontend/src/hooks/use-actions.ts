@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createAction,
   getAction,
+  getBreadcrumbs,
   listActions,
   runAction,
   updateAction,
@@ -14,11 +15,12 @@ export function useActions() {
   });
 }
 
-export function useAction(id: string) {
+export function useAction(id: string, opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["action", id],
     queryFn: () => getAction(id),
     enabled: !!id,
+    refetchInterval: opts?.refetchInterval,
   });
 }
 
@@ -41,6 +43,14 @@ export function useUpdateAction() {
       queryClient.invalidateQueries({ queryKey: ["action", data.id] });
       queryClient.invalidateQueries({ queryKey: ["actions"] });
     },
+  });
+}
+
+export function useBreadcrumbs(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["breadcrumbs", id],
+    queryFn: () => getBreadcrumbs(id),
+    enabled: enabled && !!id,
   });
 }
 

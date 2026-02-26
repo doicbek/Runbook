@@ -34,3 +34,13 @@ export async function runAction(id: string): Promise<Action> {
     method: "POST",
   });
 }
+
+export interface BreadcrumbItem {
+  id: string;
+  title: string;
+  depth: number;
+}
+
+export async function getBreadcrumbs(id: string): Promise<BreadcrumbItem[]> {
+  return apiFetch<BreadcrumbItem[]>(`/actions/${id}/breadcrumbs`);
+}

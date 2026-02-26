@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from app.services.agents.base import BaseAgent
+from app.services.agents.exceptions import InputUnavailableError
 from app.services.llm_client import chat_completion, get_default_model_for_agent
 
 logger = logging.getLogger(__name__)
@@ -166,18 +167,31 @@ class DataRetrievalAgent(BaseAgent):
                 fetched.append(content)
 
         if not fetched:
-            await log("warn", "No content retrieved — returning empty result")
-            return {
-                "summary": (
-                    f"**Data Retrieval: No Results**\n\n"
-                    f"Could not retrieve data for: {prompt}\n\n"
-                    f"Searched queries: {plan.get('queries', [])}"
-                )
-            }
+            await log("warn", "No content retrieved — signalling input unavailable")
+            tried = plan.get("queries", []) + direct_urls
+            raise InputUnavailableError(
+                f"Could not retrieve data for: {prompt[:200]}. "
+                f"Searched queries: {plan.get('queries', [])}. "
+                f"Direct URLs tried: {direct_urls}",
+                tried=tried,
+            )
 
         # ── 5. Synthesise ─────────────────────────────────────────────────────
         await log("info", f"Synthesising {len(fetched)} source(s)...")
         summary = await self._synthesise(resolved_model, prompt, plan, fetched)
+
+        # ── 6. Verify the synthesis actually contains requested data ─────────
+        if not await self._data_found(resolved_model, prompt, summary):
+            await log("warn", "Synthesis does not contain requested data — signalling input unavailable")
+            tried = plan.get("queries", []) + direct_urls
+            raise InputUnavailableError(
+                f"Retrieved {len(fetched)} source(s) but none contained the "
+                f"actual requested data for: {prompt[:200]}. "
+                f"Searched queries: {plan.get('queries', [])}. "
+                f"Direct URLs tried: {direct_urls}",
+                tried=tried,
+            )
+
         await log("info", "Done.")
         return {"summary": summary}
 
@@ -354,6 +368,47 @@ class DataRetrievalAgent(BaseAgent):
             if v:
                 urls.extend(pattern.findall(str(v)))
         return urls
+
+    # ── Post-synthesis verification ──────────────────────────────────────
+
+    async def _data_found(self, model: str, prompt: str, synthesis: str) -> bool:
+        """Quick LLM check: does the synthesis contain the actual requested data?
+
+        Returns False if the synthesis only has metadata, 'not found' messages,
+        or irrelevant content — indicating the data wasn't truly retrieved.
+        """
+        try:
+            result = await chat_completion(
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You evaluate data retrieval results. Answer ONLY "
+                            "'yes' or 'no' — nothing else."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"The task was: {prompt[:300]}\n\n"
+                            f"Retrieved result:\n{synthesis[:3000]}\n\n"
+                            "Does this result contain the actual raw data, "
+                            "dataset, or downloadable file that was requested "
+                            "(not just descriptions, metadata, links to where "
+                            "it might be, or 'data not found' messages)?"
+                        ),
+                    },
+                ],
+                max_tokens=10,
+                temperature=0,
+            )
+            answer = result.strip().lower()
+            logger.info(f"[DataRetrieval] Data-found check: '{answer}'")
+            return answer.startswith("yes")
+        except Exception as e:
+            logger.warning(f"Data-found check failed: {e} — assuming data found")
+            return True  # on error, don't block the pipeline
 
     # ── Synthesis ─────────────────────────────────────────────────────────────
 

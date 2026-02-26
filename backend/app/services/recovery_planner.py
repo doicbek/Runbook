@@ -9,6 +9,7 @@ from app.services.llm_client import get_default_model_for_agent
 logger = logging.getLogger(__name__)
 
 MAX_RECOVERY_ATTEMPTS = 2
+MAX_FULL_REPLANS = 1  # full plan regeneration attempts after per-task recovery is exhausted
 
 
 class RecoveryTask(BaseModel):

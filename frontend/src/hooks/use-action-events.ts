@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, appendTaskLog, setCodeExecution } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, clearTaskState, appendTaskLog, setCodeExecution } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -64,6 +64,14 @@ export function useActionEvents(actionId: string, enabled = true) {
               output_summary: data.error as string,
             });
             break;
+          case "task.recovering":
+            // Task is attempting inline recovery — keep it as "running"
+            // so the UI shows the live activity feed with recovery logs
+            appendTaskLog(data.task_id as string, {
+              level: "warn",
+              message: `Recovery attempt ${data.attempt}/${data.max_attempts}: ${(data.error as string) || "retrying..."}`,
+            });
+            break;
           case "log.append":
             appendTaskLog(data.task_id as string, {
               level: data.level as string,
@@ -73,14 +81,23 @@ export function useActionEvents(actionId: string, enabled = true) {
           case "action.completed":
             setActionStatus("completed");
             setRecoveryAttempt(null);
+            setReplanning(false);
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
             break;
           case "action.failed":
             setActionStatus("failed");
             setRecoveryAttempt(null);
+            setReplanning(false);
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
+            break;
+          case "action.replanning":
+            setActionStatus("running");
+            setRecoveryAttempt(null);
+            setReplanning(true);
+            clearTaskState();
+            queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             break;
           case "action.started":
             setActionStatus("running");
@@ -93,6 +110,16 @@ export function useActionEvents(actionId: string, enabled = true) {
             break;
           case "task.recovered":
             // Refetch so the replaced task(s) appear in the UI
+            queryClient.invalidateQueries({ queryKey: ["action", actionId] });
+            break;
+          case "sub_action.progress":
+            // Refetch the child action data so inline progress updates
+            if (data.sub_action_id) {
+              queryClient.invalidateQueries({ queryKey: ["action", data.sub_action_id as string] });
+            }
+            break;
+          case "task.acquisition":
+            // Task was transformed into sub_action for data acquisition
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             break;
           case "code.started":

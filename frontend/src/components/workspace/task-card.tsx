@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -9,6 +9,7 @@ import "katex/dist/katex.min.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useActionStore } from "@/stores/action-store";
+import { useAction } from "@/hooks/use-actions";
 import { useRunCode } from "@/hooks/use-tasks";
 import { getArtifactUrl } from "@/lib/api/tasks";
 import type { Artifact, CodeExecutionState, Task } from "@/types";
@@ -195,6 +196,11 @@ export function TaskCard({
           </div>
         )}
 
+        {/* Live activity feed — visible while running */}
+        {status === "running" && (
+          <LiveActivityFeed taskId={task.id} />
+        )}
+
         {/* Output section - inline expand/collapse */}
         {hasOutput && (
           <>
@@ -249,19 +255,9 @@ export function TaskCard({
           </>
         )}
 
-        {/* Sub-action link */}
+        {/* Sub-action progress & link */}
         {task.sub_action_id && (
-          <div className="px-4 pb-2">
-            <Link
-              href={`/actions/${task.sub_action_id}`}
-              className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M7 2h3v3M10 2L6 6M5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1V7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              View sub-action
-            </Link>
-          </div>
+          <SubActionProgress subActionId={task.sub_action_id} parentStatus={status} />
         )}
 
         {/* Code Execution Section */}
@@ -363,6 +359,79 @@ export function TaskCard({
   );
 }
 
+function LiveActivityFeed({ taskId }: { taskId: string }) {
+  const logs = useActionStore((s) => s.taskLogs[taskId] || []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs.length]);
+
+  // Show the last N log lines
+  const recentLogs = logs.slice(-8);
+
+  if (recentLogs.length === 0) {
+    return (
+      <div className="mx-4 mb-3 rounded-md bg-blue-500/5 border border-blue-500/10 p-2.5">
+        <div className="flex items-center gap-2">
+          <svg className="w-3 h-3 text-blue-400 animate-spin shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M6 1v2M6 9v2M1 6h2M9 6h2" strokeLinecap="round" />
+          </svg>
+          <span className="text-[11px] text-blue-400">Starting agent...</span>
+        </div>
+      </div>
+    );
+  }
+
+  const lastLog = recentLogs[recentLogs.length - 1];
+  const levelIcon = (level: string) => {
+    if (level === "error") return "text-red-400";
+    if (level === "warn") return "text-amber-400";
+    return "text-blue-400";
+  };
+
+  return (
+    <div className="mx-4 mb-3 rounded-md bg-blue-500/5 border border-blue-500/10 overflow-hidden">
+      {/* Current step header */}
+      <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-blue-500/10">
+        <svg className="w-3 h-3 text-blue-400 animate-spin shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M6 1v2M6 9v2M1 6h2M9 6h2" strokeLinecap="round" />
+        </svg>
+        <span className={`text-[11px] font-medium truncate ${levelIcon(lastLog.level)}`}>
+          {lastLog.message.slice(0, 120)}
+        </span>
+      </div>
+
+      {/* Scrollable log lines */}
+      {recentLogs.length > 1 && (
+        <div
+          ref={scrollRef}
+          className="max-h-[100px] overflow-y-auto px-2.5 py-1.5 space-y-0.5"
+        >
+          {recentLogs.slice(0, -1).map((log, i) => (
+            <div key={i} className="flex items-start gap-1.5">
+              <span className={`inline-block w-1 h-1 rounded-full mt-[5px] shrink-0 ${
+                log.level === "error" ? "bg-red-400" :
+                log.level === "warn" ? "bg-amber-400" :
+                "bg-blue-400/40"
+              }`} />
+              <span className={`text-[10px] font-mono leading-relaxed break-all ${
+                log.level === "error" ? "text-red-400/80" :
+                "text-muted-foreground/70"
+              }`}>
+                {log.message.slice(0, 200)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CodeExecutionSection({
   taskId,
   codeExecution,
@@ -427,6 +496,106 @@ function CodeExecutionSection({
         )}
       </div>
     </>
+  );
+}
+
+function SubActionProgress({
+  subActionId,
+  parentStatus,
+}: {
+  subActionId: string;
+  parentStatus: string;
+}) {
+  const isActive = parentStatus === "running";
+  const { data: childAction } = useAction(subActionId, {
+    refetchInterval: isActive ? 2000 : false,
+  });
+
+  if (!childAction) {
+    return (
+      <div className="px-4 pb-2">
+        <Link
+          href={`/actions/${subActionId}`}
+          className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M7 2h3v3M10 2L6 6M5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1V7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          View sub-action
+        </Link>
+      </div>
+    );
+  }
+
+  const tasks = childAction.tasks;
+  const total = tasks.length;
+  const completed = tasks.filter((t) => t.status === "completed").length;
+  const failed = tasks.filter((t) => t.status === "failed").length;
+  const running = tasks.filter((t) => t.status === "running").length;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  return (
+    <div className="mx-4 mb-2 rounded-md border border-violet-500/20 bg-violet-500/5 p-2.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-mono font-semibold text-violet-400">&#8599;</span>
+          <span className="text-[10px] font-medium text-violet-300 uppercase tracking-wider">
+            Sub-action
+          </span>
+          {isActive && running > 0 && (
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+          )}
+        </div>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          {completed}/{total} tasks
+          {failed > 0 && <span className="text-red-400 ml-1">({failed} failed)</span>}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-1.5 bg-violet-950/30 rounded-full overflow-hidden mb-2">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            failed > 0
+              ? "bg-gradient-to-r from-violet-500 to-red-500"
+              : "bg-violet-500"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Mini task list */}
+      <div className="space-y-0.5 mb-2">
+        {tasks.slice(0, 6).map((t, i) => (
+          <div key={t.id} className="flex items-center gap-1.5">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+              t.status === "completed" ? "bg-emerald-500" :
+              t.status === "running" ? "bg-blue-500 animate-pulse" :
+              t.status === "failed" ? "bg-red-500" :
+              "bg-gray-500"
+            }`} />
+            <span className="text-[10px] text-muted-foreground truncate">
+              {t.prompt.slice(0, 60)}{t.prompt.length > 60 ? "..." : ""}
+            </span>
+          </div>
+        ))}
+        {tasks.length > 6 && (
+          <span className="text-[10px] text-muted-foreground/60 pl-3">
+            +{tasks.length - 6} more
+          </span>
+        )}
+      </div>
+
+      <Link
+        href={`/actions/${subActionId}`}
+        className="inline-flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300 transition-colors"
+      >
+        <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M7 2h3v3M10 2L6 6M5 3H3a1 1 0 00-1 1v5a1 1 0 001 1h5a1 1 0 001-1V7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Open sub-action workspace
+      </Link>
+    </div>
   );
 }
 

@@ -47,6 +47,7 @@ async def _generate_title(prompt: str) -> str:
 
 @router.post("", response_model=ActionResponse, status_code=201)
 async def create_action(body: ActionCreate, db: AsyncSession = Depends(get_db)):
+    from app.services.executor import run_action as execute_action
     from app.services.planner import plan_tasks
 
     title = body.title if body.title else await _generate_title(body.root_prompt)
@@ -63,6 +64,9 @@ async def create_action(body: ActionCreate, db: AsyncSession = Depends(get_db)):
         db.add(t)
 
     await db.commit()
+
+    # Auto-run immediately after planning
+    asyncio.create_task(execute_action(action.id))
 
     result = await db.execute(
         select(Action).options(selectinload(Action.tasks)).where(Action.id == action.id)
@@ -102,6 +106,24 @@ async def list_actions(
             )
         )
     return response
+
+
+@router.get("/{action_id}/breadcrumbs")
+async def get_breadcrumbs(action_id: str, db: AsyncSession = Depends(get_db)):
+    """Return the parent chain for a sub-action (root first, current last)."""
+    crumbs = []
+    current_id = action_id
+    seen = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        result = await db.execute(select(Action).where(Action.id == current_id))
+        action = result.scalar_one_or_none()
+        if not action:
+            break
+        crumbs.append({"id": action.id, "title": action.title, "depth": action.depth or 0})
+        current_id = action.parent_action_id
+    crumbs.reverse()  # root first
+    return crumbs
 
 
 @router.get("/{action_id}", response_model=ActionResponse)

@@ -21,12 +21,12 @@ Each task must have:
 
 Agent type guidelines:
 - "arxiv_search": Search academic papers on arXiv and produce a literature review with citations. Use for any research, survey, or academic paper search task. Produces a markdown summary with [Author et al., Year] citations and arXiv URLs.
-- "code_execution": Execute real Python code in a sandbox. Has access to numpy, scipy, matplotlib, pandas. Use for data analysis, curve fitting, plotting, and computation. Produces code blocks that can be run.
-- "data_retrieval": Fetch data from web APIs, databases, or scrape web pages.
+- "code_execution": Execute real Python code in a sandbox. Has access to numpy, scipy, matplotlib, pandas, urllib, and can install packages. Use for data analysis, curve fitting, plotting, computation, and downloading data from APIs. Can fetch data directly using urllib.request.
+- "data_retrieval": Fetch data from web APIs, databases, or scrape web pages via web search. Best for general web data. For specialized scientific datasets, prefer code_execution which can install domain-specific packages.
 - "spreadsheet": Create or manipulate structured tabular data.
 - "report": Generate a formatted markdown report or document synthesizing inputs from other tasks.
 - "general": Catch-all for tasks that don't fit other categories.
-- "sub_action": Spawn a child action with its own multi-step planner-generated DAG. Use ONLY when a sub-problem is itself so complex that it requires multiple sequential or parallel steps to solve (e.g., a full research-then-analysis pipeline, or a multi-stage data collection and processing workflow). The task prompt must specify exactly what the sub-action should produce as output. Do NOT use sub_action for simple single-step tasks.
+- "sub_action": Spawn a child action with its own multi-step planner-generated DAG. Use ONLY when a sub-problem is itself so complex that it requires multiple coordinated steps (e.g., a full research-then-analysis sub-workflow, or a multi-stage data pipeline with its own report). The task prompt must clearly describe the goal and expected output. Do NOT use sub_action for simple single-step tasks — prefer a direct agent type instead. Max nesting depth: 3 levels.
 
 Available LLM models and their strengths:
 - "openai/gpt-4o": Good all-rounder (default for general tasks)
@@ -41,7 +41,9 @@ Common workflow patterns:
 - Research + analysis: arxiv_search → code_execution → report
 - Data pipeline: data_retrieval → code_execution → report
 - Literature review: arxiv_search → report
-- Deep research: sub_action (literature review + analysis sub-workflow) → code_execution → report
+- Scientific data: code_execution (download with domain packages) → code_execution (analysis) → report
+- Complex sub-problem: sub_action (e.g., "Research and compare 5 ML frameworks, producing a comparison table and recommendation") → report
+- Parallel independent investigations: multiple sub_action tasks in parallel → report that synthesizes all findings
 
 IMPORTANT RULES:
 - The LAST task must ALWAYS be a "report" task that synthesizes and summarizes all outputs from upstream tasks. Never end with code_execution, data_retrieval, or any non-report task.

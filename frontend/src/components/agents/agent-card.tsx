@@ -18,6 +18,7 @@ const REAL_BUILTINS = new Set([
   "spreadsheet",
   "report",
   "general",
+  "sub_action",
 ]);
 
 function implBadge(agent: AgentDefinition) {

@@ -22,5 +22,14 @@ node_modules/
 .vscode/
 .idea/
 
+# Dev script logs
+.logs/
+
+# Runtime data
+backend/artifacts/
+backend/data/
+backend/actions.db-shm
+backend/actions.db-wal
+
 # OS
 .DS_Store

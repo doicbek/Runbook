@@ -7,12 +7,15 @@ interface ActionStore {
   taskOverrides: Record<string, Partial<Task>>;
   actionStatus: string | null;
   recoveryAttempt: number | null;  // set when action.retrying fires
+  isReplanning: boolean;           // set when action.replanning fires
   taskLogs: Record<string, { level: string; message: string; timestamp: string }[]>;
   codeExecutions: Record<string, CodeExecutionState>;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
   setRecoveryAttempt: (attempt: number | null) => void;
+  setReplanning: (v: boolean) => void;
+  clearTaskState: () => void;
   appendTaskLog: (taskId: string, log: { level: string; message: string }) => void;
   resetForAction: (actionId: string) => void;
   resetLogs: (taskId: string) => void;
@@ -31,6 +34,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   taskOverrides: {},
   actionStatus: null,
   recoveryAttempt: null,
+  isReplanning: false,
   taskLogs: {},
   codeExecutions: {},
 
@@ -47,6 +51,12 @@ export const useActionStore = create<ActionStore>((set, get) => ({
 
   setRecoveryAttempt: (attempt) =>
     set({ recoveryAttempt: attempt }),
+
+  setReplanning: (v) =>
+    set({ isReplanning: v }),
+
+  clearTaskState: () =>
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {} }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -65,6 +75,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskOverrides: {},
       actionStatus: null,
       recoveryAttempt: null,
+      isReplanning: false,
       taskLogs: {},
       codeExecutions: {},
     }),
