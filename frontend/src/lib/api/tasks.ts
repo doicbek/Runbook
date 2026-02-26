@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE } from "@/lib/api";
-import type { CodeExecutionResult, LogEntry, Task } from "@/types";
+import type { AgentIteration, CodeExecutionResult, LogEntry, Task } from "@/types";
 
 export async function createTask(
   actionId: string,
@@ -40,6 +40,15 @@ export async function runTaskCode(
       method: "POST",
       body: JSON.stringify(code ? { code } : {}),
     }
+  );
+}
+
+export async function getTaskIterations(
+  actionId: string,
+  taskId: string
+): Promise<AgentIteration[]> {
+  return apiFetch<AgentIteration[]>(
+    `/actions/${actionId}/tasks/${taskId}/iterations`
   );
 }
 
