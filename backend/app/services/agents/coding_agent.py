@@ -4,15 +4,19 @@ Runs inside a git worktree and iteratively uses tools (read, write, edit,
 glob, grep, bash) to solve programming tasks.
 """
 
+import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.database import async_session
 from app.models.agent_iteration import AgentIteration
+from app.models.artifact import Artifact
 from app.services.agents.base import BaseAgent
 from app.services.agents.coding_tools import (
     bash_run,
@@ -26,6 +30,8 @@ from app.services.event_bus import event_bus
 from app.services.llm_client import MODEL_REGISTRY, get_default_model_for_agent
 from app.services.pause_manager import pause_manager
 from app.services.worktree_manager import create_worktree, remove_worktree
+
+ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +278,21 @@ class CodingAgent(BaseAgent):
 
         # Store workspace info on the task
         await self._update_task_workspace(task_id, worktree_path, branch_name)
+
+        # Generate completion artifacts (diff + enriched summary)
+        try:
+            result = await self._generate_completion_artifacts(
+                task_id=task_id,
+                action_id=action_id,
+                workspace=worktree_path,
+                branch_name=branch_name,
+                agent_summary=result.get("summary", "Task completed."),
+                log_callback=log_callback,
+            )
+        except Exception:
+            logger.exception(f"Failed to generate completion artifacts for task {task_id}")
+            # Fall back to basic result if artifact generation fails
+            pass
 
         return result
 
@@ -818,3 +839,132 @@ class CodingAgent(BaseAgent):
                 task.workspace_path = workspace_path
                 task.workspace_branch = branch_name
                 await db.commit()
+
+    async def _generate_completion_artifacts(
+        self,
+        task_id: str,
+        action_id: str,
+        workspace: str,
+        branch_name: str,
+        agent_summary: str,
+        log_callback: Any,
+    ) -> dict[str, Any]:
+        """Generate a git diff artifact and enriched summary on completion."""
+
+        # Get the diff of all changes on the worktree branch vs its merge base
+        diff_text = ""
+        files_changed = 0
+        try:
+            # First try diffing against the merge base with main/master
+            proc = await asyncio.create_subprocess_exec(
+                "git", "diff", "--stat", "HEAD",
+                cwd=workspace,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stat_stdout, _ = await proc.communicate()
+            stat_output = stat_stdout.decode(errors="replace").strip()
+
+            # Count files changed from --stat output
+            if stat_output:
+                # Last line of git diff --stat is like " 3 files changed, ..."
+                for line in stat_output.splitlines():
+                    if "file" in line and "changed" in line:
+                        parts = line.strip().split()
+                        if parts and parts[0].isdigit():
+                            files_changed = int(parts[0])
+
+            # Get the full unified diff
+            proc = await asyncio.create_subprocess_exec(
+                "git", "diff", "HEAD",
+                cwd=workspace,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            diff_stdout, _ = await proc.communicate()
+            diff_text = diff_stdout.decode(errors="replace")
+
+            # If no uncommitted changes, try diff against the initial commit
+            if not diff_text.strip():
+                # Try to find the merge base with the default branch
+                for base_ref in ("main", "master"):
+                    proc = await asyncio.create_subprocess_exec(
+                        "git", "merge-base", base_ref, "HEAD",
+                        cwd=workspace,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    mb_stdout, _ = await proc.communicate()
+                    if proc.returncode == 0:
+                        merge_base = mb_stdout.decode().strip()
+                        proc2 = await asyncio.create_subprocess_exec(
+                            "git", "diff", merge_base, "HEAD",
+                            cwd=workspace,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        d_stdout, _ = await proc2.communicate()
+                        diff_text = d_stdout.decode(errors="replace")
+
+                        # Also get stat
+                        proc3 = await asyncio.create_subprocess_exec(
+                            "git", "diff", "--stat", merge_base, "HEAD",
+                            cwd=workspace,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        s_stdout, _ = await proc3.communicate()
+                        stat_output = s_stdout.decode(errors="replace").strip()
+                        for line in stat_output.splitlines():
+                            if "file" in line and "changed" in line:
+                                parts = line.strip().split()
+                                if parts and parts[0].isdigit():
+                                    files_changed = int(parts[0])
+                        break
+
+        except Exception as e:
+            logger.warning(f"Failed to generate git diff for task {task_id}: {e}")
+            diff_text = f"# Error generating diff: {e}"
+
+        # Save diff to disk as an artifact file
+        artifact_id = str(uuid.uuid4())
+        artifact_dir = ARTIFACTS_DIR / action_id / task_id
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        diff_filename = f"changes-{task_id[:8]}.diff"
+        diff_path = artifact_dir / diff_filename
+        diff_path.write_text(diff_text or "# No changes detected", encoding="utf-8")
+        diff_size = diff_path.stat().st_size
+
+        # Create Artifact record
+        async with async_session() as db:
+            artifact = Artifact(
+                id=artifact_id,
+                task_id=task_id,
+                action_id=action_id,
+                type="file",
+                mime_type="text/x-diff",
+                storage_path=str(diff_path),
+                size_bytes=diff_size,
+            )
+            db.add(artifact)
+            await db.commit()
+
+        if log_callback:
+            await log_callback("info", f"Created diff artifact: {files_changed} files changed")
+
+        # Build enriched summary
+        summary_text = (
+            f"{agent_summary}\n\n"
+            f"**Branch:** `{branch_name}`\n"
+            f"**Files changed:** {files_changed}\n"
+        )
+
+        output_summary = (
+            f"Modified {files_changed} file(s) on branch {branch_name}."
+        )
+
+        return {
+            "summary": summary_text,
+            "output_summary": output_summary,
+            "artifact_ids": [artifact_id],
+        }

@@ -10,6 +10,7 @@
 - Backend Python runs from `/mnt/c/Users/dobec/actions/backend/`
 - For LLM tool calling, use provider SDKs directly (not `chat_completion()`); OpenAI and Anthropic have different tool call/result formats
 - CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
+- Pause/resume uses in-memory `pause_manager` singleton; CodingAgent checks between iterations; task status 'paused' is valid
 
 ---
 
@@ -134,4 +135,38 @@
   - `time.monotonic()` is better than `time.time()` for measuring durations (not affected by clock changes)
   - `_transform_to_acquisition` is now dead code (was only used indirectly via old recovery path) — can be cleaned up later
   - AgentIteration records from executor have empty tool_calls (detailed iterations are created by agents like CodingAgent internally)
+---
+
+## 2026-02-26 - US-010
+- Added pause/resume API endpoints for tasks
+- New `backend/app/services/pause_manager.py`: in-memory PauseManager with asyncio.Event-based blocking
+- POST `/actions/{action_id}/tasks/{task_id}/pause`: sets pause signal, publishes `task.paused` SSE event
+- POST `/actions/{action_id}/tasks/{task_id}/resume`: clears pause, accepts optional guidance text, publishes `task.resumed` and `task.user_guidance` SSE events
+- Guidance stored as AgentIteration record with `outcome='user_guidance'` and `loop_type='user_guidance'`
+- CodingAgent checks `pause_manager.is_paused()` between iterations; blocks on `wait_for_resume()`
+- On pause: sets task status to 'paused' in DB; on resume: restores to 'running'
+- Guidance injected into conversation as a user message so the LLM incorporates it
+- Files changed: `backend/app/services/pause_manager.py` (new), `backend/app/routers/tasks.py`, `backend/app/services/agents/coding_agent.py`
+- **Learnings for future iterations:**
+  - `asyncio.Event` is the right primitive for pause/resume — `clear()` to pause, `set()` to resume, `wait()` to block
+  - In-memory state is fine for single-process; if scaling to workers, would need Redis-based signals
+  - Pause check goes at the top of the iteration loop, before any LLM calls
+  - Task status 'paused' is a new valid status alongside pending/running/completed/failed
+---
+
+## 2026-02-26 - US-011
+- Added completion artifact generation to CodingAgent
+- On `done` tool call, agent now generates a unified git diff of all changes on the worktree branch
+- Diff stored as Artifact with `type='file'`, `mime_type='text/x-diff'` on disk at `artifacts/{action_id}/{task_id}/changes-{task_id[:8]}.diff`
+- Enriched result dict with `output_summary` (short: "Modified N file(s) on branch X") and `artifact_ids`
+- `_save_task_success` in executor updated to use `output_summary` if provided and pass `artifact_ids` to TaskOutput
+- Diff generation tries: (1) uncommitted changes via `git diff HEAD`, (2) committed changes via `git diff merge-base...HEAD` against main/master
+- Graceful fallback: if diff generation fails, original summary is preserved
+- Files changed: `backend/app/services/agents/coding_agent.py`, `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - `ARTIFACTS_DIR` pattern from code_runner.py: `Path(__file__).parent.parent.parent / "artifacts"` — reuse for any agent that stores files
+  - Artifact records need: task_id, action_id, type, mime_type, storage_path, size_bytes
+  - `_save_task_success` in executor is the central place for TaskOutput creation — extend its result dict handling rather than duplicating
+  - `asyncio.create_subprocess_exec` for git commands in async context (consistent with worktree_manager pattern)
+  - `git diff --stat` last line format: " N files changed, M insertions(+), L deletions(-)"
 ---

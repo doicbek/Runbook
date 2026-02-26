@@ -819,18 +819,21 @@ async def _save_task_success(action_id: str, task_id: str, result: dict):
         task_result = await db.execute(select(Task).where(Task.id == task_id))
         task = task_result.scalar_one()
         task.status = "completed"
-        task.output_summary = result.get("summary", "Completed")
+        # Prefer output_summary if agent provided one, else fall back to summary
+        task.output_summary = result.get("output_summary") or result.get("summary", "Completed")
         if result.get("sub_action_id"):
             task.sub_action_id = result["sub_action_id"]
 
         task_output = TaskOutput(
             task_id=task_id,
             text=result.get("summary", "Completed"),
+            artifact_ids=result.get("artifact_ids", []),
         )
         db.add(task_output)
         await db.commit()
 
     await event_bus.publish(action_id, "task.completed", {
         "task_id": task_id,
-        "output_summary": result.get("summary", "Completed"),
+        "output_summary": result.get("output_summary") or result.get("summary", "Completed"),
+        "artifact_ids": result.get("artifact_ids", []),
     })
