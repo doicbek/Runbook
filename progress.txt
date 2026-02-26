@@ -199,3 +199,37 @@
   - `iteration.completed` is the only event that builds a full AgentIteration record; earlier events (started, reasoning, tool_call, tool_result) only update `currentIteration` for live status display
   - Exported interfaces (CurrentIterationInfo, RetryStatus) from the store file for use by UI components
 ---
+
+## 2026-02-26 - US-014
+- Built `IterationSummary` component in `frontend/src/components/workspace/iteration-summary.tsx`
+- Shows 3 states: running (iteration N/50 + progress bar + reasoning snippet), completed (summary with iteration count/tool calls/duration), failed (error message)
+- Retry banner shows "Retry N/M - trying alternative approach" when `retryStatus` is present
+- Latest tool call one-liner displayed when running with completed iterations
+- Reads from Zustand store: `taskIterations`, `currentIteration`, `retryStatus`
+- Integrated into TaskCard between LiveActivityFeed and Output sections
+- Component returns null when no iteration data exists (non-coding tasks unaffected)
+- Files changed: `frontend/src/components/workspace/iteration-summary.tsx` (new), `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - Import store interfaces with `import type { X } from "@/stores/action-store"` — they're exported alongside the store
+  - TaskCard placement order: header → prompt → deps → LiveActivityFeed → IterationSummary → Output → SubAction → CodeExecution → Error → Actions
+  - The `currentIteration` map entry is cleared when a task finishes, so check both `current` and `lastIteration.outcome` to determine final state
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-015
+- Built `IterationTimeline` component in `frontend/src/components/workspace/iteration-timeline.tsx`
+- Collapsed by default with expand/collapse toggle showing iteration count
+- Each iteration row: #N, tool icon(s), one-line summary, success/fail badge, duration
+- Clicking a row expands to show: full reasoning text, list of tool calls with expandable input/output
+- Failed iterations highlighted with red left border, successful with green, user guidance with blue
+- Retry loop iterations visually grouped with "Primary Attempt" and "Retry Attempt N" section headers
+- Auto-scrolls to latest iteration when task is running
+- Integrated into TaskCard below IterationSummary
+- Files changed: `frontend/src/components/workspace/iteration-timeline.tsx` (new), `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - TaskCard placement order updated: header → prompt → deps → LiveActivityFeed → IterationSummary → IterationTimeline → Output → SubAction → CodeExecution → Error → Actions
+  - `AgentIteration.loop_type` can be "primary", "retry", or "user_guidance" — group by loop_type and attempt_number for visual sectioning
+  - Tool call input is `Record<string, unknown>` — use `JSON.stringify` for display; output is a string
+  - Truncate displayed content (2000 chars) to prevent DOM bloat from large outputs
+  - No browser verification tools available — manual browser testing needed
+---
