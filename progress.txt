@@ -58,3 +58,18 @@
   - `git worktree list --porcelain` gives machine-parseable output with `worktree`, `HEAD`, `branch` fields
   - Services don't need to be registered in models/__init__.py — only models do
 ---
+
+## 2026-02-26 - US-005
+- Implemented coding agent tool functions in `backend/app/services/agents/coding_tools.py`
+- Six async functions: `read_file`, `write_file`, `edit_file`, `glob_search`, `grep_search`, `bash_run`
+- All path-accepting functions use `_resolve_and_validate()` to ensure paths stay within workspace directory
+- `edit_file` returns unified diff of the change, replaces first occurrence only
+- `grep_search` skips `.git/` dirs and binary files, caps at 500 results
+- `bash_run` uses `asyncio.create_subprocess_shell` with configurable timeout
+- Files changed: `backend/app/services/agents/coding_tools.py` (new)
+- **Learnings for future iterations:**
+  - `Path.resolve()` + `relative_to()` is the reliable way to check path containment (handles symlinks, `..`, etc.)
+  - `difflib.unified_diff` needs `keepends=True` on splitlines to produce clean diffs
+  - `asyncio.create_subprocess_shell` for shell commands vs `asyncio.create_subprocess_exec` for direct execution
+  - Tool functions are standalone async functions, not methods on a class — keeps them easy to test and wire into LLM tool schemas
+---
