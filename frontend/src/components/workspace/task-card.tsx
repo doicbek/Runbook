@@ -15,6 +15,7 @@ import { getArtifactUrl } from "@/lib/api/tasks";
 import type { Artifact, CodeExecutionState, Task } from "@/types";
 import { TaskCardEditor } from "./task-card-editor";
 import { TaskLogsDrawer } from "./task-logs-drawer";
+import { IterationSummary } from "./iteration-summary";
 
 const remarkPlugins = [remarkMath];
 const rehypePlugins = [rehypeKatex];
@@ -200,6 +201,9 @@ export function TaskCard({
         {status === "running" && (
           <LiveActivityFeed taskId={task.id} />
         )}
+
+        {/* Iteration summary — shows agent iteration progress */}
+        <IterationSummary taskId={task.id} />
 
         {/* Output section - inline expand/collapse */}
         {hasOutput && (
