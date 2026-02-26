@@ -32,6 +32,8 @@ async def init_db():
             "ALTER TABLE actions ADD COLUMN depth INTEGER DEFAULT 0",
             "ALTER TABLE actions ADD COLUMN retry_count INTEGER DEFAULT 0",
             "ALTER TABLE tasks ADD COLUMN sub_action_id TEXT",
+            "ALTER TABLE tasks ADD COLUMN workspace_path TEXT",
+            "ALTER TABLE tasks ADD COLUMN workspace_branch TEXT",
         ]:
             try:
                 await conn.execute(text(stmt))

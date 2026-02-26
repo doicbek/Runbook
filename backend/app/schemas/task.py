@@ -27,6 +27,8 @@ class TaskResponse(BaseModel):
     dependencies: list[str]
     output_summary: str | None = None
     sub_action_id: str | None = None
+    workspace_path: str | None = None
+    workspace_branch: str | None = None
     created_at: datetime
     updated_at: datetime
 
