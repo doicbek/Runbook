@@ -76,6 +76,19 @@
   - Tool functions are standalone async functions, not methods on a class — keeps them easy to test and wire into LLM tool schemas
 ---
 
+## 2026-02-26 - US-007
+- Registered coding agent in agent registry (`get_agent` and `get_agent_async` in `registry.py`)
+- Added `_BUILTIN_TYPES` set entry for "coding"
+- Added coding AgentDefinition to `seed_builtins.py` (is_builtin=True, icon 💻)
+- Updated planner system prompt in `planner.py` with coding agent description and added to agent_type list
+- Added default model for coding agent in `llm_client.py` (anthropic/claude-sonnet-4-6)
+- Files changed: `backend/app/services/agents/registry.py`, `backend/app/services/agents/seed_builtins.py`, `backend/app/services/planner.py`, `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - To add a new builtin agent: (1) add to `_BUILTIN_TYPES` set, (2) add if-block in both `get_agent` and `get_agent_async`, (3) add seed entry in `seed_builtins.py`, (4) add to planner system prompt agent_type list + guidelines, (5) add default model in `DEFAULT_MODELS_BY_AGENT_TYPE`
+  - Planner schema uses free string for agent_type (no enum), so no schema changes needed
+  - The `seed_builtin_agents()` function does an upsert — it will update name/description/icon on existing records but won't overwrite custom code
+---
+
 ## 2026-02-26 - US-006
 - Implemented CodingAgent in `backend/app/services/agents/coding_agent.py` extending BaseAgent
 - Agentic loop: sends conversation history + tool definitions to LLM, executes tool calls, appends results, repeats until done/fail or max_iterations (50)

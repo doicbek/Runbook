@@ -153,6 +153,7 @@ DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
     "report": "anthropic/claude-sonnet-4-6",
     "data_retrieval": "openai/gpt-4.1-mini",
     "spreadsheet": "openai/gpt-4.1",
+    "coding": "anthropic/claude-sonnet-4-6",   # Claude excellent for agentic coding loops
     "general": "openai/gpt-5",               # gpt-5 fine for reasoning; not code gen
 }
 
