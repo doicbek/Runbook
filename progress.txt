@@ -170,3 +170,32 @@
   - `asyncio.create_subprocess_exec` for git commands in async context (consistent with worktree_manager pattern)
   - `git diff --stat` last line format: " N files changed, M insertions(+), L deletions(-)"
 ---
+
+## 2026-02-26 - US-012
+- Added `AgentIteration` and `AgentIterationToolCall` TypeScript types to `frontend/src/types/index.ts`
+- Added `getTaskIterations()` API function to `frontend/src/lib/api/tasks.ts`
+- Created `useTaskIterations(actionId, taskId, opts?)` React Query hook in `frontend/src/hooks/use-task-iterations.ts`
+- Hook supports `refetchInterval` for polling (e.g., every 2s when task is running) and `enabled` flag
+- Files changed: `frontend/src/types/index.ts`, `frontend/src/lib/api/tasks.ts`, `frontend/src/hooks/use-task-iterations.ts` (new)
+- **Learnings for future iterations:**
+  - Frontend hook pattern: `useQuery` with `queryKey`, `queryFn`, `enabled`, and optional `refetchInterval`
+  - API function pattern: `apiFetch<T>(path)` with type from `@/types`
+  - Import types with `import type { ... }` for type-only imports
+  - Hooks go in `frontend/src/hooks/use-<name>.ts`, API functions in `frontend/src/lib/api/<domain>.ts`
+---
+
+## 2026-02-26 - US-013
+- Extended Zustand `useActionStore` with three new state maps: `taskIterations` (task_id → AgentIteration[]), `currentIteration` (task_id → CurrentIterationInfo), `retryStatus` (task_id → RetryStatus)
+- Added three new methods: `addIteration()`, `updateCurrentIteration()`, `setRetryStatus()`
+- Updated `clearTaskState()` and `resetForAction()` to clear the new state maps
+- Extended `useActionEvents` hook to handle 7 iteration event types: `iteration.started`, `iteration.reasoning`, `iteration.tool_call`, `iteration.tool_result`, `iteration.completed`, `iteration.file_diff`, `iteration.terminal`
+- Added 3 retry loop event handlers: `task.retry_loop.started`, `task.retry_loop.iteration`, `task.retry_loop.exhausted`
+- `iteration.completed` builds a full AgentIteration record and adds it to `taskIterations`
+- `iteration.file_diff` and `iteration.terminal` also append to task logs for immediate visibility
+- Files changed: `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`
+- **Learnings for future iterations:**
+  - Zustand store methods that remove keys from maps need the `delete next[key]; return { map: next }` pattern
+  - SSE event handler destructuring must include all new store methods in the initial `useActionStore.getState()` call
+  - `iteration.completed` is the only event that builds a full AgentIteration record; earlier events (started, reasoning, tool_call, tool_result) only update `currentIteration` for live status display
+  - Exported interfaces (CurrentIterationInfo, RetryStatus) from the store file for use by UI components
+---

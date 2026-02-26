@@ -1,5 +1,17 @@
 import { create } from "zustand";
-import type { CodeExecutionState, Task } from "@/types";
+import type { AgentIteration, CodeExecutionState, Task } from "@/types";
+
+export interface CurrentIterationInfo {
+  iteration_number: number;
+  reasoning: string | null;
+  tool: string | null;
+  status: "running" | "tool_calling" | "completed" | "failed";
+}
+
+export interface RetryStatus {
+  attempt: number;
+  max_attempts: number;
+}
 
 interface ActionStore {
   // Scoped to the currently viewed action
@@ -10,6 +22,9 @@ interface ActionStore {
   isReplanning: boolean;           // set when action.replanning fires
   taskLogs: Record<string, { level: string; message: string; timestamp: string }[]>;
   codeExecutions: Record<string, CodeExecutionState>;
+  taskIterations: Record<string, AgentIteration[]>;
+  currentIteration: Record<string, CurrentIterationInfo>;
+  retryStatus: Record<string, RetryStatus>;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
@@ -20,6 +35,9 @@ interface ActionStore {
   resetForAction: (actionId: string) => void;
   resetLogs: (taskId: string) => void;
   setCodeExecution: (taskId: string, data: Partial<CodeExecutionState>) => void;
+  addIteration: (taskId: string, iteration: AgentIteration) => void;
+  updateCurrentIteration: (taskId: string, info: Partial<CurrentIterationInfo>) => void;
+  setRetryStatus: (taskId: string, status: RetryStatus | null) => void;
 }
 
 const defaultCodeState: CodeExecutionState = {
@@ -37,6 +55,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   isReplanning: false,
   taskLogs: {},
   codeExecutions: {},
+  taskIterations: {},
+  currentIteration: {},
+  retryStatus: {},
 
   setTaskOverride: (taskId, override) =>
     set((state) => ({
@@ -56,7 +77,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     set({ isReplanning: v }),
 
   clearTaskState: () =>
-    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {} }),
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {} }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -78,6 +99,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       isReplanning: false,
       taskLogs: {},
       codeExecutions: {},
+      taskIterations: {},
+      currentIteration: {},
+      retryStatus: {},
     }),
 
   resetLogs: (taskId) =>
@@ -97,4 +121,35 @@ export const useActionStore = create<ActionStore>((set, get) => ({
         },
       },
     })),
+
+  addIteration: (taskId, iteration) =>
+    set((state) => ({
+      taskIterations: {
+        ...state.taskIterations,
+        [taskId]: [...(state.taskIterations[taskId] || []), iteration],
+      },
+    })),
+
+  updateCurrentIteration: (taskId, info) =>
+    set((state) => ({
+      currentIteration: {
+        ...state.currentIteration,
+        [taskId]: {
+          ...(state.currentIteration[taskId] || { iteration_number: 0, reasoning: null, tool: null, status: "running" as const }),
+          ...info,
+        },
+      },
+    })),
+
+  setRetryStatus: (taskId, status) =>
+    set((state) => {
+      if (status === null) {
+        const next = { ...state.retryStatus };
+        delete next[taskId];
+        return { retryStatus: next };
+      }
+      return {
+        retryStatus: { ...state.retryStatus, [taskId]: status },
+      };
+    }),
 }));
