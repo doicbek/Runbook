@@ -254,3 +254,18 @@
   - Tool call input is `Record<string, unknown>` — cast to access `.path`
   - No browser verification tools available — manual browser testing needed
 ---
+
+## 2026-02-26 - US-017
+- Built `TerminalViewer` component in `frontend/src/components/workspace/terminal-viewer.tsx`
+- Dark background (zinc-950), monospace font, command shown as `$ command` prompt line
+- stdout in light text, stderr in orange text, exit code footer with green check (0) or red X (non-zero)
+- Max-height container with scrollbar, output truncated to 5000 chars
+- Added `parseBashOutput()` helper in iteration-timeline.tsx to extract stdout/stderr/exit_code from JSON-stringified bash output
+- Integrated into `ToolCallDetail`: renders TerminalViewer when tool is `bash`
+- Files changed: `frontend/src/components/workspace/terminal-viewer.tsx` (new), `frontend/src/components/workspace/iteration-timeline.tsx`
+- **Learnings for future iterations:**
+  - Bash tool output is stored as `JSON.stringify({stdout, stderr, exit_code})` in AgentIterationToolCall.output — parse it to extract structured fields
+  - When tool output is structured JSON, add a parser helper rather than passing raw string to the viewer
+  - TerminalViewer is a pure presentational component — no state, no store dependency
+  - No browser verification tools available — manual browser testing needed
+---
