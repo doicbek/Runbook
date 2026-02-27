@@ -29,7 +29,7 @@ export interface Task {
   id: string;
   action_id: string;
   prompt: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "paused";
   agent_type: string;
   model: string | null;
   dependencies: string[];

@@ -52,6 +52,26 @@ export async function getTaskIterations(
   );
 }
 
+export async function pauseTask(
+  actionId: string,
+  taskId: string
+): Promise<void> {
+  await apiFetch(`/actions/${actionId}/tasks/${taskId}/pause`, {
+    method: "POST",
+  });
+}
+
+export async function resumeTask(
+  actionId: string,
+  taskId: string,
+  body?: { guidance?: string; redirect?: boolean }
+): Promise<void> {
+  await apiFetch(`/actions/${actionId}/tasks/${taskId}/resume`, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
 export function getArtifactUrl(artifactId: string): string {
   return `${API_BASE}/artifacts/${artifactId}/content`;
 }

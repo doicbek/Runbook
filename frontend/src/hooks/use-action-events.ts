@@ -240,6 +240,20 @@ export function useActionEvents(actionId: string, enabled = true) {
               max_attempts: data.max_attempts as number,
             });
             break;
+
+          // --- Pause/resume events ---
+          case "task.paused":
+            setTaskOverride(data.task_id as string, { status: "paused" });
+            break;
+          case "task.resumed":
+            setTaskOverride(data.task_id as string, { status: "running" });
+            break;
+          case "task.user_guidance":
+            appendTaskLog(data.task_id as string, {
+              level: "info",
+              message: `User guidance: ${(data.guidance as string) || "resumed"}`,
+            });
+            break;
         }
       },
       () => {

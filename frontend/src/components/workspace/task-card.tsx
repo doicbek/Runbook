@@ -17,6 +17,7 @@ import { TaskCardEditor } from "./task-card-editor";
 import { TaskLogsDrawer } from "./task-logs-drawer";
 import { IterationSummary } from "./iteration-summary";
 import { IterationTimeline } from "./iteration-timeline";
+import { PauseButton, PauseGuidancePanel } from "./pause-guidance-panel";
 
 const remarkPlugins = [remarkMath];
 const rehypePlugins = [rehypeKatex];
@@ -53,6 +54,12 @@ const statusConfig: Record<
     dotClass: "bg-red-500",
     badgeClass:
       "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800",
+  },
+  paused: {
+    label: "Paused",
+    dotClass: "bg-amber-500",
+    badgeClass:
+      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800",
   },
 };
 
@@ -163,13 +170,18 @@ export function TaskCard({
               </span>
             )}
           </div>
-          <Badge
-            variant="outline"
-            className={`text-[10px] font-medium px-2 py-0.5 gap-1.5 ${config.badgeClass}`}
-          >
-            <span className={`inline-block w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
-            {config.label}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            {status === "running" && (
+              <PauseButton actionId={actionId} taskId={task.id} />
+            )}
+            <Badge
+              variant="outline"
+              className={`text-[10px] font-medium px-2 py-0.5 gap-1.5 ${config.badgeClass}`}
+            >
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
+              {config.label}
+            </Badge>
+          </div>
         </div>
 
         {/* Prompt section */}
@@ -201,6 +213,11 @@ export function TaskCard({
         {/* Live activity feed — visible while running */}
         {status === "running" && (
           <LiveActivityFeed taskId={task.id} />
+        )}
+
+        {/* Pause guidance panel — visible when paused */}
+        {status === "paused" && (
+          <PauseGuidancePanel actionId={actionId} taskId={task.id} />
         )}
 
         {/* Iteration summary — shows agent iteration progress */}
@@ -294,7 +311,7 @@ export function TaskCard({
             size="sm"
             className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
             onClick={() => setEditing(true)}
-            disabled={status === "running"}
+            disabled={status === "running" || status === "paused"}
           >
             <svg className="w-3 h-3 mr-1" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M8.5 1.5l2 2M1.5 8.5l5-5 2 2-5 5H1.5v-2z" strokeLinecap="round" strokeLinejoin="round" />
