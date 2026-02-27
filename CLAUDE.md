@@ -1,6 +1,6 @@
 # claude.md
 
-**Project name: Workdeck**
+**Project name: Runbook**
 
 ## Project Overview
 
