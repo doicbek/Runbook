@@ -288,3 +288,19 @@
   - `pauseTask`/`resumeTask` are fire-and-forget from the UI — SSE events update the store, no need to handle response
   - No browser verification tools available — manual browser testing needed
 ---
+
+## 2026-02-26 - US-019
+- Implemented iteration history retention and cleanup background service
+- Added `ITERATION_RETENTION_DAYS` env var (default 30) to `backend/app/config.py`
+- New `backend/app/services/iteration_cleanup.py` with:
+  - `cleanup_old_iterations()`: deletes AgentIteration records older than retention period for completed actions only
+  - `iteration_cleanup_loop()`: runs cleanup on startup and every 24 hours via `asyncio.sleep`
+- Wired into server lifespan in `backend/app/main.py`: `asyncio.create_task(iteration_cleanup_loop())`, cancelled on shutdown
+- Task, TaskOutput, and Artifact records are not affected by cleanup
+- Files changed: `backend/app/config.py`, `backend/app/services/iteration_cleanup.py` (new), `backend/app/main.py`
+- **Learnings for future iterations:**
+  - Background tasks in FastAPI: create in lifespan before `yield`, cancel after `yield`
+  - `asyncio.create_task()` returns a task handle that must be cancelled on shutdown to avoid warnings
+  - `sqlalchemy.delete().where(...in_(...))` works for bulk deletes with subquery filtering
+  - Only clean up iterations for completed actions — running/failed actions may still need their history
+---
