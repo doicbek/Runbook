@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createSSEConnection } from "@/lib/sse";
 import { useActionStore } from "@/stores/action-store";
-import type { Task } from "@/types";
+import type { AgentIteration, Task } from "@/types";
 
 export function useActionEvents(actionId: string, enabled = true) {
   const queryClientRef = useRef(useQueryClient());
@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, clearTaskState, appendTaskLog, setCodeExecution } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -148,6 +148,111 @@ export function useActionEvents(actionId: string, enabled = true) {
             appendTaskLog(data.task_id as string, {
               level: data.level as string,
               message: data.message as string,
+            });
+            break;
+
+          // --- Iteration events ---
+          case "iteration.started":
+            updateCurrentIteration(data.task_id as string, {
+              iteration_number: data.iteration_number as number,
+              reasoning: null,
+              tool: null,
+              status: "running",
+            });
+            break;
+          case "iteration.reasoning":
+            updateCurrentIteration(data.task_id as string, {
+              iteration_number: data.iteration_number as number,
+              reasoning: data.reasoning as string,
+            });
+            break;
+          case "iteration.tool_call":
+            updateCurrentIteration(data.task_id as string, {
+              iteration_number: data.iteration_number as number,
+              tool: data.tool as string,
+              status: "tool_calling",
+            });
+            break;
+          case "iteration.tool_result":
+            updateCurrentIteration(data.task_id as string, {
+              iteration_number: data.iteration_number as number,
+              tool: data.tool as string,
+              status: "running",
+            });
+            break;
+          case "iteration.completed": {
+            const taskId = data.task_id as string;
+            const outcome = data.outcome as string;
+            updateCurrentIteration(taskId, {
+              iteration_number: data.iteration_number as number,
+              status: outcome === "failed" ? "failed" : outcome === "completed" ? "completed" : "running",
+            });
+            // Build an AgentIteration record from the completed event data
+            addIteration(taskId, {
+              id: (data.iteration_id as string) || `iter-${taskId}-${data.iteration_number}`,
+              task_id: taskId,
+              action_id: actionId,
+              iteration_number: data.iteration_number as number,
+              loop_type: (data.loop_type as "primary" | "retry" | "user_guidance") || "primary",
+              attempt_number: (data.attempt_number as number) || 0,
+              reasoning: (data.reasoning as string) || null,
+              tool_calls: (data.tool_calls as AgentIteration["tool_calls"]) || [],
+              outcome: outcome as AgentIteration["outcome"],
+              error: (data.error as string) || null,
+              lessons_learned: (data.lessons_learned as string) || null,
+              created_at: new Date().toISOString(),
+              duration_ms: (data.duration_ms as number) || 0,
+            });
+            break;
+          }
+          case "iteration.file_diff":
+            // File diff events are associated with the current iteration
+            // Append as a log for immediate visibility
+            appendTaskLog(data.task_id as string, {
+              level: "info",
+              message: `File changed: ${data.file_path as string}`,
+            });
+            break;
+          case "iteration.terminal":
+            // Terminal output events — append as a log
+            appendTaskLog(data.task_id as string, {
+              level: (data.exit_code as number) === 0 ? "info" : "warn",
+              message: `$ ${data.command as string} → exit ${data.exit_code as number}`,
+            });
+            break;
+
+          // --- Recovery events (LLM-triaged retry/sub-action) ---
+          case "task.recovery.started":
+            setRetryStatus(data.task_id as string, {
+              attempt: 1,
+              max_attempts: data.max_attempts as number,
+            });
+            break;
+          case "task.recovery.attempt":
+            setRetryStatus(data.task_id as string, {
+              attempt: data.attempt as number,
+              max_attempts: data.max_attempts as number,
+              strategy: data.strategy as string,
+            });
+            break;
+          case "task.recovery.exhausted":
+            setRetryStatus(data.task_id as string, {
+              attempt: data.max_attempts as number,
+              max_attempts: data.max_attempts as number,
+            });
+            break;
+
+          // --- Pause/resume events ---
+          case "task.paused":
+            setTaskOverride(data.task_id as string, { status: "paused" });
+            break;
+          case "task.resumed":
+            setTaskOverride(data.task_id as string, { status: "running" });
+            break;
+          case "task.user_guidance":
+            appendTaskLog(data.task_id as string, {
+              level: "info",
+              message: `User guidance: ${(data.guidance as string) || "resumed"}`,
             });
             break;
         }

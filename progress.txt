@@ -1,0 +1,306 @@
+## Codebase Patterns
+- Models use SQLAlchemy `DeclarativeBase` with `Mapped` type annotations and UUID string PKs
+- No Alembic migrations — new tables auto-created by `Base.metadata.create_all()`, new columns added via idempotent `ALTER TABLE` in `init_db()`
+- All models must be imported in `init_db()` (database.py) AND exported from `models/__init__.py`
+- Use `IF NOT EXISTS` pattern (try/except) for column migrations in `init_db()`
+- JSON columns use `sqlalchemy.JSON` with `default=list` or `default=dict`
+- Timestamps use `DateTime` with `default=lambda: datetime.now(timezone.utc)`
+- Run `python -m py_compile` from `backend/` dir for quick typecheck; use `python -c "from app.models.X import Y"` to verify imports
+- Git operations must be run from repo root `/mnt/c/Users/dobec/actions/`
+- Backend Python runs from `/mnt/c/Users/dobec/actions/backend/`
+- For LLM tool calling, use provider SDKs directly (not `chat_completion()`); OpenAI and Anthropic have different tool call/result formats
+- CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
+- Pause/resume uses in-memory `pause_manager` singleton; CodingAgent checks between iterations; task status 'paused' is valid
+- `diff2html` is available for rendering unified diffs; use `ColorSchemeType` enum from `diff2html/lib/types`, not string literals
+
+---
+
+## 2026-02-26 - US-001
+- Implemented AgentIteration model in `backend/app/models/agent_iteration.py`
+- Fields: id, task_id (FK), action_id (FK), iteration_number, loop_type, attempt_number, reasoning, tool_calls (JSON), outcome, error, lessons_learned, created_at, duration_ms
+- Added composite index on (task_id, iteration_number)
+- Registered in `models/__init__.py` and `database.py` init_db imports
+- Files changed: `backend/app/models/agent_iteration.py` (new), `backend/app/models/__init__.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - Model file pattern: import uuid, datetime; import SA types; import Base from app.database; define class extending Base
+  - The `__table_args__` tuple is used for composite indexes
+  - py_compile works for basic syntax/import checking; runtime import test catches SQLAlchemy issues
+---
+
+## 2026-02-26 - US-003
+- Added `workspace_path` (Text, nullable) and `workspace_branch` (String(200), nullable) fields to Task model
+- Added both fields to `TaskResponse` Pydantic schema so they appear in API responses
+- Added idempotent `ALTER TABLE` migrations in `init_db()` for existing databases
+- Files changed: `backend/app/models/task.py`, `backend/app/schemas/task.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - Adding new nullable columns is straightforward: add `Mapped[str | None]` to model, add field to response schema, add ALTER TABLE to init_db
+  - Existing tasks unaffected since fields default to None
+---
+
+## 2026-02-26 - US-002
+- Added `GET /actions/{action_id}/tasks/{task_id}/iterations` endpoint to tasks router
+- Created `AgentIterationResponse` Pydantic schema with all fields matching the model
+- Endpoint returns iterations ordered by `iteration_number`, empty list if none exist
+- Validates task exists and belongs to action (404 if not found)
+- Files changed: `backend/app/routers/tasks.py`, `backend/app/schemas/task.py`
+- **Learnings for future iterations:**
+  - Schema pattern: add Pydantic response models to `backend/app/schemas/task.py` with `model_config = {"from_attributes": True}` for ORM compat
+  - Router pattern: import models from `app.models` (which re-exports from submodules); import schemas from `app.schemas.task`
+  - Existing endpoint patterns: validate parent entity exists first, use `select().where().order_by()`, return `scalars().all()`
+---
+
+## 2026-02-26 - US-004
+- Implemented git worktree manager service in `backend/app/services/worktree_manager.py`
+- Three async functions: `create_worktree(task_id, repo_path)`, `remove_worktree(worktree_path)`, `list_worktrees(repo_path)`
+- Worktrees created at `{repo_path}/.workdeck/worktrees/{task_id}/` with branch `workdeck/task-{task_id[:8]}`
+- Uses `asyncio.create_subprocess_exec` for git commands (non-blocking)
+- `WORKDECK_REPO_PATH` env var configures default repo path
+- Handles edge cases: branch already exists, worktree removal fallback, stale worktree pruning
+- Files changed: `backend/app/services/worktree_manager.py` (new)
+- **Learnings for future iterations:**
+  - Use `asyncio.create_subprocess_exec` for subprocess calls in async code (not `subprocess.run`)
+  - `git worktree list --porcelain` gives machine-parseable output with `worktree`, `HEAD`, `branch` fields
+  - Services don't need to be registered in models/__init__.py — only models do
+---
+
+## 2026-02-26 - US-005
+- Implemented coding agent tool functions in `backend/app/services/agents/coding_tools.py`
+- Six async functions: `read_file`, `write_file`, `edit_file`, `glob_search`, `grep_search`, `bash_run`
+- All path-accepting functions use `_resolve_and_validate()` to ensure paths stay within workspace directory
+- `edit_file` returns unified diff of the change, replaces first occurrence only
+- `grep_search` skips `.git/` dirs and binary files, caps at 500 results
+- `bash_run` uses `asyncio.create_subprocess_shell` with configurable timeout
+- Files changed: `backend/app/services/agents/coding_tools.py` (new)
+- **Learnings for future iterations:**
+  - `Path.resolve()` + `relative_to()` is the reliable way to check path containment (handles symlinks, `..`, etc.)
+  - `difflib.unified_diff` needs `keepends=True` on splitlines to produce clean diffs
+  - `asyncio.create_subprocess_shell` for shell commands vs `asyncio.create_subprocess_exec` for direct execution
+  - Tool functions are standalone async functions, not methods on a class — keeps them easy to test and wire into LLM tool schemas
+---
+
+## 2026-02-26 - US-007
+- Registered coding agent in agent registry (`get_agent` and `get_agent_async` in `registry.py`)
+- Added `_BUILTIN_TYPES` set entry for "coding"
+- Added coding AgentDefinition to `seed_builtins.py` (is_builtin=True, icon 💻)
+- Updated planner system prompt in `planner.py` with coding agent description and added to agent_type list
+- Added default model for coding agent in `llm_client.py` (anthropic/claude-sonnet-4-6)
+- Files changed: `backend/app/services/agents/registry.py`, `backend/app/services/agents/seed_builtins.py`, `backend/app/services/planner.py`, `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - To add a new builtin agent: (1) add to `_BUILTIN_TYPES` set, (2) add if-block in both `get_agent` and `get_agent_async`, (3) add seed entry in `seed_builtins.py`, (4) add to planner system prompt agent_type list + guidelines, (5) add default model in `DEFAULT_MODELS_BY_AGENT_TYPE`
+  - Planner schema uses free string for agent_type (no enum), so no schema changes needed
+  - The `seed_builtin_agents()` function does an upsert — it will update name/description/icon on existing records but won't overwrite custom code
+---
+
+## 2026-02-26 - US-006
+- Implemented CodingAgent in `backend/app/services/agents/coding_agent.py` extending BaseAgent
+- Agentic loop: sends conversation history + tool definitions to LLM, executes tool calls, appends results, repeats until done/fail or max_iterations (50)
+- Supports both OpenAI-compatible and Anthropic providers for tool calling (different API formats)
+- 8 tool definitions: read_file, write_file, edit_file, glob, grep, bash, done, fail
+- Each iteration creates an AgentIteration record with reasoning, tool_calls (input+output+duration+success), and outcome
+- On completion: stores workspace_path and workspace_branch on Task, returns summary
+- On failure: cleans up worktree, preserves iteration history
+- Messages normalized to OpenAI dict format internally; Anthropic adapter converts tool_use/tool_result blocks
+- Files changed: `backend/app/services/agents/coding_agent.py` (new)
+- **Learnings for future iterations:**
+  - `chat_completion()` only returns text — for tool calling, must use provider SDKs directly
+  - OpenAI tool calls come back as `message.tool_calls[].function.{name, arguments}`; Anthropic uses `content[].type == "tool_use"` blocks
+  - Anthropic requires tool results as `{"role": "user", "content": [{"type": "tool_result", ...}]}` — NOT as `{"role": "tool"}`
+  - OpenAI newer models (gpt-5, o-series) use `max_completion_tokens` and don't support temperature
+  - Tool output truncation prevents context window overflow — use `_truncate()` helper
+---
+
+## 2026-02-26 - US-008
+- Added iteration SSE events to the coding agent's agentic loop
+- 7 event types: iteration.started, iteration.reasoning, iteration.tool_call, iteration.tool_result, iteration.completed, iteration.file_diff, iteration.terminal
+- Events published in real-time (not batched) as they happen during the loop
+- SSE endpoint at GET /actions/{id}/events already forwards all event bus events transparently
+- Files changed: `backend/app/services/agents/coding_agent.py`
+- **Learnings for future iterations:**
+  - The SSE endpoint is generic — it forwards any event type from the event bus, so no changes needed to add new event types
+  - Event data should be truncated to prevent oversized SSE payloads (reasoning: 2000 chars, output_summary: 500 chars, diff: 5000 chars, terminal: 2000 chars)
+  - The event_bus.publish() is async but non-blocking (uses put_nowait), so it won't slow down the agent loop
+---
+
+## 2026-02-26 - US-009
+- Replaced inline recovery sub-action mechanism with executor-level retry loop in `_run_task()`
+- On primary agent failure, enters retry loop (up to `_MAX_RETRY_ITERATIONS=3`) that re-calls `agent.execute()` with augmented prompt containing structured failure history
+- `_build_failure_history()` helper constructs failure context block injected before the effective prompt
+- AgentIteration records created for both primary attempt (attempt_number=0, loop_type='primary') and each retry (attempt_number=1-3, loop_type='retry')
+- 3 new SSE event types: `task.retry_loop.started`, `task.retry_loop.iteration`, `task.retry_loop.exhausted`
+- Removed `_spawn_recovery_sub_action` function and `_MAX_INLINE_RECOVERY` constant
+- Outer DAG recovery (`_attempt_recovery`, `_full_replan`) preserved as safety net
+- All existing agents work without modification — retry uses same `get_agent_async()` + `agent.execute()` interface
+- Files changed: `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - The retry loop approach is simpler than sub-action recovery: same agent, same interface, just augmented prompt
+  - `time.monotonic()` is better than `time.time()` for measuring durations (not affected by clock changes)
+  - `_transform_to_acquisition` is now dead code (was only used indirectly via old recovery path) — can be cleaned up later
+  - AgentIteration records from executor have empty tool_calls (detailed iterations are created by agents like CodingAgent internally)
+---
+
+## 2026-02-26 - US-010
+- Added pause/resume API endpoints for tasks
+- New `backend/app/services/pause_manager.py`: in-memory PauseManager with asyncio.Event-based blocking
+- POST `/actions/{action_id}/tasks/{task_id}/pause`: sets pause signal, publishes `task.paused` SSE event
+- POST `/actions/{action_id}/tasks/{task_id}/resume`: clears pause, accepts optional guidance text, publishes `task.resumed` and `task.user_guidance` SSE events
+- Guidance stored as AgentIteration record with `outcome='user_guidance'` and `loop_type='user_guidance'`
+- CodingAgent checks `pause_manager.is_paused()` between iterations; blocks on `wait_for_resume()`
+- On pause: sets task status to 'paused' in DB; on resume: restores to 'running'
+- Guidance injected into conversation as a user message so the LLM incorporates it
+- Files changed: `backend/app/services/pause_manager.py` (new), `backend/app/routers/tasks.py`, `backend/app/services/agents/coding_agent.py`
+- **Learnings for future iterations:**
+  - `asyncio.Event` is the right primitive for pause/resume — `clear()` to pause, `set()` to resume, `wait()` to block
+  - In-memory state is fine for single-process; if scaling to workers, would need Redis-based signals
+  - Pause check goes at the top of the iteration loop, before any LLM calls
+  - Task status 'paused' is a new valid status alongside pending/running/completed/failed
+---
+
+## 2026-02-26 - US-011
+- Added completion artifact generation to CodingAgent
+- On `done` tool call, agent now generates a unified git diff of all changes on the worktree branch
+- Diff stored as Artifact with `type='file'`, `mime_type='text/x-diff'` on disk at `artifacts/{action_id}/{task_id}/changes-{task_id[:8]}.diff`
+- Enriched result dict with `output_summary` (short: "Modified N file(s) on branch X") and `artifact_ids`
+- `_save_task_success` in executor updated to use `output_summary` if provided and pass `artifact_ids` to TaskOutput
+- Diff generation tries: (1) uncommitted changes via `git diff HEAD`, (2) committed changes via `git diff merge-base...HEAD` against main/master
+- Graceful fallback: if diff generation fails, original summary is preserved
+- Files changed: `backend/app/services/agents/coding_agent.py`, `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - `ARTIFACTS_DIR` pattern from code_runner.py: `Path(__file__).parent.parent.parent / "artifacts"` — reuse for any agent that stores files
+  - Artifact records need: task_id, action_id, type, mime_type, storage_path, size_bytes
+  - `_save_task_success` in executor is the central place for TaskOutput creation — extend its result dict handling rather than duplicating
+  - `asyncio.create_subprocess_exec` for git commands in async context (consistent with worktree_manager pattern)
+  - `git diff --stat` last line format: " N files changed, M insertions(+), L deletions(-)"
+---
+
+## 2026-02-26 - US-012
+- Added `AgentIteration` and `AgentIterationToolCall` TypeScript types to `frontend/src/types/index.ts`
+- Added `getTaskIterations()` API function to `frontend/src/lib/api/tasks.ts`
+- Created `useTaskIterations(actionId, taskId, opts?)` React Query hook in `frontend/src/hooks/use-task-iterations.ts`
+- Hook supports `refetchInterval` for polling (e.g., every 2s when task is running) and `enabled` flag
+- Files changed: `frontend/src/types/index.ts`, `frontend/src/lib/api/tasks.ts`, `frontend/src/hooks/use-task-iterations.ts` (new)
+- **Learnings for future iterations:**
+  - Frontend hook pattern: `useQuery` with `queryKey`, `queryFn`, `enabled`, and optional `refetchInterval`
+  - API function pattern: `apiFetch<T>(path)` with type from `@/types`
+  - Import types with `import type { ... }` for type-only imports
+  - Hooks go in `frontend/src/hooks/use-<name>.ts`, API functions in `frontend/src/lib/api/<domain>.ts`
+---
+
+## 2026-02-26 - US-013
+- Extended Zustand `useActionStore` with three new state maps: `taskIterations` (task_id → AgentIteration[]), `currentIteration` (task_id → CurrentIterationInfo), `retryStatus` (task_id → RetryStatus)
+- Added three new methods: `addIteration()`, `updateCurrentIteration()`, `setRetryStatus()`
+- Updated `clearTaskState()` and `resetForAction()` to clear the new state maps
+- Extended `useActionEvents` hook to handle 7 iteration event types: `iteration.started`, `iteration.reasoning`, `iteration.tool_call`, `iteration.tool_result`, `iteration.completed`, `iteration.file_diff`, `iteration.terminal`
+- Added 3 retry loop event handlers: `task.retry_loop.started`, `task.retry_loop.iteration`, `task.retry_loop.exhausted`
+- `iteration.completed` builds a full AgentIteration record and adds it to `taskIterations`
+- `iteration.file_diff` and `iteration.terminal` also append to task logs for immediate visibility
+- Files changed: `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`
+- **Learnings for future iterations:**
+  - Zustand store methods that remove keys from maps need the `delete next[key]; return { map: next }` pattern
+  - SSE event handler destructuring must include all new store methods in the initial `useActionStore.getState()` call
+  - `iteration.completed` is the only event that builds a full AgentIteration record; earlier events (started, reasoning, tool_call, tool_result) only update `currentIteration` for live status display
+  - Exported interfaces (CurrentIterationInfo, RetryStatus) from the store file for use by UI components
+---
+
+## 2026-02-26 - US-014
+- Built `IterationSummary` component in `frontend/src/components/workspace/iteration-summary.tsx`
+- Shows 3 states: running (iteration N/50 + progress bar + reasoning snippet), completed (summary with iteration count/tool calls/duration), failed (error message)
+- Retry banner shows "Retry N/M - trying alternative approach" when `retryStatus` is present
+- Latest tool call one-liner displayed when running with completed iterations
+- Reads from Zustand store: `taskIterations`, `currentIteration`, `retryStatus`
+- Integrated into TaskCard between LiveActivityFeed and Output sections
+- Component returns null when no iteration data exists (non-coding tasks unaffected)
+- Files changed: `frontend/src/components/workspace/iteration-summary.tsx` (new), `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - Import store interfaces with `import type { X } from "@/stores/action-store"` — they're exported alongside the store
+  - TaskCard placement order: header → prompt → deps → LiveActivityFeed → IterationSummary → Output → SubAction → CodeExecution → Error → Actions
+  - The `currentIteration` map entry is cleared when a task finishes, so check both `current` and `lastIteration.outcome` to determine final state
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-015
+- Built `IterationTimeline` component in `frontend/src/components/workspace/iteration-timeline.tsx`
+- Collapsed by default with expand/collapse toggle showing iteration count
+- Each iteration row: #N, tool icon(s), one-line summary, success/fail badge, duration
+- Clicking a row expands to show: full reasoning text, list of tool calls with expandable input/output
+- Failed iterations highlighted with red left border, successful with green, user guidance with blue
+- Retry loop iterations visually grouped with "Primary Attempt" and "Retry Attempt N" section headers
+- Auto-scrolls to latest iteration when task is running
+- Integrated into TaskCard below IterationSummary
+- Files changed: `frontend/src/components/workspace/iteration-timeline.tsx` (new), `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - TaskCard placement order updated: header → prompt → deps → LiveActivityFeed → IterationSummary → IterationTimeline → Output → SubAction → CodeExecution → Error → Actions
+  - `AgentIteration.loop_type` can be "primary", "retry", or "user_guidance" — group by loop_type and attempt_number for visual sectioning
+  - Tool call input is `Record<string, unknown>` — use `JSON.stringify` for display; output is a string
+  - Truncate displayed content (2000 chars) to prevent DOM bloat from large outputs
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-016
+- Built `DiffViewer` component in `frontend/src/components/workspace/diff-viewer.tsx`
+- Uses `diff2html` library (already installed) to render unified diffs with syntax highlighting
+- Added/removed lines shown with green/red backgrounds, context lines neutral, hunk headers in blue
+- File path displayed as header above the diff
+- Fallback rendering (raw colored lines) if diff2html parsing fails
+- Dark theme CSS overrides via styled-jsx global for diff2html's `.d2h-*` classes
+- Integrated into `ToolCallDetail` in iteration-timeline.tsx: renders DiffViewer when tool is `edit_file` or `write_file` and output contains diff markers
+- Extracts `path` from tool call input for the file path header
+- Diff output truncated to 5000 chars to prevent DOM bloat
+- Files changed: `frontend/src/components/workspace/diff-viewer.tsx` (new), `frontend/src/components/workspace/iteration-timeline.tsx`
+- **Learnings for future iterations:**
+  - `diff2html` uses enums (e.g., `ColorSchemeType.DARK`), not string literals — import from `diff2html/lib/types`
+  - CSS import: `import "diff2html/bundles/css/diff2html.min.css"` for base styles
+  - Use `drawFileList: false` to hide diff2html's built-in file list header (we show our own)
+  - styled-jsx `global` works in Next.js client components for overriding third-party CSS
+  - Tool call input is `Record<string, unknown>` — cast to access `.path`
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-017
+- Built `TerminalViewer` component in `frontend/src/components/workspace/terminal-viewer.tsx`
+- Dark background (zinc-950), monospace font, command shown as `$ command` prompt line
+- stdout in light text, stderr in orange text, exit code footer with green check (0) or red X (non-zero)
+- Max-height container with scrollbar, output truncated to 5000 chars
+- Added `parseBashOutput()` helper in iteration-timeline.tsx to extract stdout/stderr/exit_code from JSON-stringified bash output
+- Integrated into `ToolCallDetail`: renders TerminalViewer when tool is `bash`
+- Files changed: `frontend/src/components/workspace/terminal-viewer.tsx` (new), `frontend/src/components/workspace/iteration-timeline.tsx`
+- **Learnings for future iterations:**
+  - Bash tool output is stored as `JSON.stringify({stdout, stderr, exit_code})` in AgentIterationToolCall.output — parse it to extract structured fields
+  - When tool output is structured JSON, add a parser helper rather than passing raw string to the viewer
+  - TerminalViewer is a pure presentational component — no state, no store dependency
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-018
+- Built `PauseButton` and `PauseGuidancePanel` components in `frontend/src/components/workspace/pause-guidance-panel.tsx`
+- PauseButton: small icon button rendered in TaskCard header when task status is 'running', calls `POST /actions/{actionId}/tasks/{taskId}/pause`
+- PauseGuidancePanel: displayed when task status is 'paused' — textarea for guidance, "Redirect" checkbox, Resume and Submit & Resume buttons
+- Guidance submitted via `POST /actions/{actionId}/tasks/{taskId}/resume` with optional `guidance` text and `redirect` flag
+- Added `paused` to Task status type in `frontend/src/types/index.ts`
+- Added `paused` status config (amber color scheme) to `statusConfig` in TaskCard
+- Added `pauseTask()` and `resumeTask()` API functions to `frontend/src/lib/api/tasks.ts`
+- Added SSE event handlers for `task.paused`, `task.resumed`, and `task.user_guidance` in `use-action-events.ts`
+- Edit button disabled for paused tasks (alongside running)
+- Files changed: `frontend/src/components/workspace/pause-guidance-panel.tsx` (new), `frontend/src/components/workspace/task-card.tsx`, `frontend/src/hooks/use-action-events.ts`, `frontend/src/lib/api/tasks.ts`, `frontend/src/types/index.ts`
+- **Learnings for future iterations:**
+  - Backend pause/resume endpoints already existed in `backend/app/routers/tasks.py` — only frontend work was needed
+  - The `statusConfig` object in TaskCard must be updated when adding new task statuses
+  - SSE event handlers in `use-action-events.ts` just need simple `setTaskOverride` calls for status changes
+  - `pauseTask`/`resumeTask` are fire-and-forget from the UI — SSE events update the store, no need to handle response
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-019
+- Implemented iteration history retention and cleanup background service
+- Added `ITERATION_RETENTION_DAYS` env var (default 30) to `backend/app/config.py`
+- New `backend/app/services/iteration_cleanup.py` with:
+  - `cleanup_old_iterations()`: deletes AgentIteration records older than retention period for completed actions only
+  - `iteration_cleanup_loop()`: runs cleanup on startup and every 24 hours via `asyncio.sleep`
+- Wired into server lifespan in `backend/app/main.py`: `asyncio.create_task(iteration_cleanup_loop())`, cancelled on shutdown
+- Task, TaskOutput, and Artifact records are not affected by cleanup
+- Files changed: `backend/app/config.py`, `backend/app/services/iteration_cleanup.py` (new), `backend/app/main.py`
+- **Learnings for future iterations:**
+  - Background tasks in FastAPI: create in lifespan before `yield`, cancel after `yield`
+  - `asyncio.create_task()` returns a task handle that must be cancelled on shutdown to avoid warnings
+  - `sqlalchemy.delete().where(...in_(...))` works for bulk deletes with subquery filtering
+  - Only clean up iterations for completed actions — running/failed actions may still need their history
+---

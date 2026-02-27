@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import action, agent_definition, artifact, log, planner_config, task, task_output  # noqa: F401
+    from app.models import action, agent_definition, agent_iteration, artifact, log, planner_config, task, task_output  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -32,6 +32,8 @@ async def init_db():
             "ALTER TABLE actions ADD COLUMN depth INTEGER DEFAULT 0",
             "ALTER TABLE actions ADD COLUMN retry_count INTEGER DEFAULT 0",
             "ALTER TABLE tasks ADD COLUMN sub_action_id TEXT",
+            "ALTER TABLE tasks ADD COLUMN workspace_path TEXT",
+            "ALTER TABLE tasks ADD COLUMN workspace_branch TEXT",
         ]:
             try:
                 await conn.execute(text(stmt))

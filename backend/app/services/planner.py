@@ -15,12 +15,13 @@ SYSTEM_PROMPT = """You are a task planner for an agentic workflow system. Given 
 
 Each task must have:
 - prompt: A specific, concrete instruction (not vague like "analyze data" but specific like "fetch weather data for San Francisco from the Open-Meteo API for all of 2025")
-- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "report", "general", "arxiv_search", "sub_action"
+- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "coding", "report", "general", "arxiv_search", "sub_action"
 - dependencies: Array of 0-based indices of tasks this task depends on (must only reference earlier tasks)
 - model: (optional) Override the LLM model for this task. Use "provider/model_id" format. Leave null to use the default for the agent type.
 
 Agent type guidelines:
 - "arxiv_search": Search academic papers on arXiv and produce a literature review with citations. Use for any research, survey, or academic paper search task. Produces a markdown summary with [Author et al., Year] citations and arXiv URLs.
+- "coding": LLM-driven agentic coding loop in an isolated git worktree. Has tools: read_file, write_file, edit_file, glob, grep, bash. Iteratively plans, writes code, runs tests, and debugs. Use for tasks involving file creation/editing, code writing, debugging, testing, refactoring, or any work that needs to modify files in a repository. Produces a git diff and change summary.
 - "code_execution": Execute real Python code in a sandbox. Has access to numpy, scipy, matplotlib, pandas, urllib, and can install packages. Use for data analysis, curve fitting, plotting, computation, and downloading data from APIs. Can fetch data directly using urllib.request.
 - "data_retrieval": Fetch data from web APIs, databases, or scrape web pages via web search. Best for general web data. For specialized scientific datasets, prefer code_execution which can install domain-specific packages.
 - "spreadsheet": Create or manipulate structured tabular data.

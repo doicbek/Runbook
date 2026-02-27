@@ -103,6 +103,22 @@ BUILTIN_AGENTS = [
         "icon": "🤖",
     },
     {
+        "agent_type": "coding",
+        "name": "Coding",
+        "description": (
+            "Real implementation — LLM-driven agentic coding loop inside an isolated git worktree. "
+            "Has tools: read_file, write_file, edit_file, glob, grep, bash. Iteratively plans, "
+            "writes code, runs tests, and debugs until the task is complete. Produces a git diff "
+            "artifact and change summary. Use for tasks involving file creation/editing, code "
+            "writing, debugging, testing, refactoring, or any work that needs to modify files "
+            "in a repository."
+        ),
+        "tools": ["git", "bash", "file_io"],
+        "status": "active",
+        "is_builtin": True,
+        "icon": "💻",
+    },
+    {
         "agent_type": "sub_action",
         "name": "Sub-Action",
         "description": (

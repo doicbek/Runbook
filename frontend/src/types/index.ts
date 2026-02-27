@@ -29,7 +29,7 @@ export interface Task {
   id: string;
   action_id: string;
   prompt: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "paused";
   agent_type: string;
   model: string | null;
   dependencies: string[];
@@ -164,4 +164,28 @@ export interface ModifyRequest {
 
 export interface ModifyResponse {
   code: string;
+}
+
+export interface AgentIterationToolCall {
+  tool: string;
+  input: Record<string, unknown>;
+  output: string;
+  duration_ms: number;
+  success: boolean;
+}
+
+export interface AgentIteration {
+  id: string;
+  task_id: string;
+  action_id: string;
+  iteration_number: number;
+  loop_type: "primary" | "retry" | "user_guidance";
+  attempt_number: number;
+  reasoning: string | null;
+  tool_calls: AgentIterationToolCall[];
+  outcome: "continue" | "completed" | "failed" | "paused" | "user_redirected" | "user_guidance";
+  error: string | null;
+  lessons_learned: string | null;
+  created_at: string;
+  duration_ms: number;
 }

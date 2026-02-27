@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE } from "@/lib/api";
-import type { CodeExecutionResult, LogEntry, Task } from "@/types";
+import type { AgentIteration, CodeExecutionResult, LogEntry, Task } from "@/types";
 
 export async function createTask(
   actionId: string,
@@ -41,6 +41,35 @@ export async function runTaskCode(
       body: JSON.stringify(code ? { code } : {}),
     }
   );
+}
+
+export async function getTaskIterations(
+  actionId: string,
+  taskId: string
+): Promise<AgentIteration[]> {
+  return apiFetch<AgentIteration[]>(
+    `/actions/${actionId}/tasks/${taskId}/iterations`
+  );
+}
+
+export async function pauseTask(
+  actionId: string,
+  taskId: string
+): Promise<void> {
+  await apiFetch(`/actions/${actionId}/tasks/${taskId}/pause`, {
+    method: "POST",
+  });
+}
+
+export async function resumeTask(
+  actionId: string,
+  taskId: string,
+  body?: { guidance?: string; redirect?: boolean }
+): Promise<void> {
+  await apiFetch(`/actions/${actionId}/tasks/${taskId}/resume`, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+  });
 }
 
 export function getArtifactUrl(artifactId: string): string {

@@ -9,7 +9,7 @@ from app.services.agents.mock_agent import MockAgent
 
 logger = logging.getLogger(__name__)
 
-_BUILTIN_TYPES = {"arxiv_search", "code_execution"}
+_BUILTIN_TYPES = {"arxiv_search", "code_execution", "coding"}
 
 
 def get_agent(agent_type: str) -> BaseAgent:
@@ -35,6 +35,9 @@ def get_agent(agent_type: str) -> BaseAgent:
     if agent_type == "sub_action":
         from app.services.agents.sub_action_agent import SubActionAgent
         return SubActionAgent()
+    if agent_type == "coding":
+        from app.services.agents.coding_agent import CodingAgent
+        return CodingAgent()
     return MockAgent(agent_type=agent_type)
 
 
@@ -81,6 +84,9 @@ async def get_agent_async(agent_type: str, db: AsyncSession) -> BaseAgent:
     if agent_type == "sub_action":
         from app.services.agents.sub_action_agent import SubActionAgent
         return SubActionAgent()
+    if agent_type == "coding":
+        from app.services.agents.coding_agent import CodingAgent
+        return CodingAgent()
 
     return MockAgent(agent_type=agent_type)
 
