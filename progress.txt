@@ -11,6 +11,7 @@
 - For LLM tool calling, use provider SDKs directly (not `chat_completion()`); OpenAI and Anthropic have different tool call/result formats
 - CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
 - Pause/resume uses in-memory `pause_manager` singleton; CodingAgent checks between iterations; task status 'paused' is valid
+- `diff2html` is available for rendering unified diffs; use `ColorSchemeType` enum from `diff2html/lib/types`, not string literals
 
 ---
 
@@ -231,5 +232,25 @@
   - `AgentIteration.loop_type` can be "primary", "retry", or "user_guidance" — group by loop_type and attempt_number for visual sectioning
   - Tool call input is `Record<string, unknown>` — use `JSON.stringify` for display; output is a string
   - Truncate displayed content (2000 chars) to prevent DOM bloat from large outputs
+  - No browser verification tools available — manual browser testing needed
+---
+
+## 2026-02-26 - US-016
+- Built `DiffViewer` component in `frontend/src/components/workspace/diff-viewer.tsx`
+- Uses `diff2html` library (already installed) to render unified diffs with syntax highlighting
+- Added/removed lines shown with green/red backgrounds, context lines neutral, hunk headers in blue
+- File path displayed as header above the diff
+- Fallback rendering (raw colored lines) if diff2html parsing fails
+- Dark theme CSS overrides via styled-jsx global for diff2html's `.d2h-*` classes
+- Integrated into `ToolCallDetail` in iteration-timeline.tsx: renders DiffViewer when tool is `edit_file` or `write_file` and output contains diff markers
+- Extracts `path` from tool call input for the file path header
+- Diff output truncated to 5000 chars to prevent DOM bloat
+- Files changed: `frontend/src/components/workspace/diff-viewer.tsx` (new), `frontend/src/components/workspace/iteration-timeline.tsx`
+- **Learnings for future iterations:**
+  - `diff2html` uses enums (e.g., `ColorSchemeType.DARK`), not string literals — import from `diff2html/lib/types`
+  - CSS import: `import "diff2html/bundles/css/diff2html.min.css"` for base styles
+  - Use `drawFileList: false` to hide diff2html's built-in file list header (we show our own)
+  - styled-jsx `global` works in Next.js client components for overriding third-party CSS
+  - Tool call input is `Record<string, unknown>` — cast to access `.path`
   - No browser verification tools available — manual browser testing needed
 ---
