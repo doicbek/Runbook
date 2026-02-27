@@ -269,3 +269,22 @@
   - TerminalViewer is a pure presentational component — no state, no store dependency
   - No browser verification tools available — manual browser testing needed
 ---
+
+## 2026-02-26 - US-018
+- Built `PauseButton` and `PauseGuidancePanel` components in `frontend/src/components/workspace/pause-guidance-panel.tsx`
+- PauseButton: small icon button rendered in TaskCard header when task status is 'running', calls `POST /actions/{actionId}/tasks/{taskId}/pause`
+- PauseGuidancePanel: displayed when task status is 'paused' — textarea for guidance, "Redirect" checkbox, Resume and Submit & Resume buttons
+- Guidance submitted via `POST /actions/{actionId}/tasks/{taskId}/resume` with optional `guidance` text and `redirect` flag
+- Added `paused` to Task status type in `frontend/src/types/index.ts`
+- Added `paused` status config (amber color scheme) to `statusConfig` in TaskCard
+- Added `pauseTask()` and `resumeTask()` API functions to `frontend/src/lib/api/tasks.ts`
+- Added SSE event handlers for `task.paused`, `task.resumed`, and `task.user_guidance` in `use-action-events.ts`
+- Edit button disabled for paused tasks (alongside running)
+- Files changed: `frontend/src/components/workspace/pause-guidance-panel.tsx` (new), `frontend/src/components/workspace/task-card.tsx`, `frontend/src/hooks/use-action-events.ts`, `frontend/src/lib/api/tasks.ts`, `frontend/src/types/index.ts`
+- **Learnings for future iterations:**
+  - Backend pause/resume endpoints already existed in `backend/app/routers/tasks.py` — only frontend work was needed
+  - The `statusConfig` object in TaskCard must be updated when adding new task statuses
+  - SSE event handlers in `use-action-events.ts` just need simple `setTaskOverride` calls for status changes
+  - `pauseTask`/`resumeTask` are fire-and-forget from the UI — SSE events update the store, no need to handle response
+  - No browser verification tools available — manual browser testing needed
+---
