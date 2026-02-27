@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useActionStore } from "@/stores/action-store";
 import type { RetryStatus } from "@/stores/action-store";
 import type { AgentIteration, AgentIterationToolCall } from "@/types";
+import { DiffViewer } from "./diff-viewer";
 
 const toolIcons: Record<string, string> = {
   read_file: "📄",
@@ -85,15 +86,30 @@ function ToolCallDetail({ call }: { call: AgentIterationToolCall }) {
             <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-medium">
               Output
             </span>
-            <pre
-              className={`text-[10px] font-mono rounded p-1.5 mt-0.5 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all ${
-                call.success
-                  ? "text-muted-foreground bg-muted/30"
-                  : "text-red-400 bg-red-500/5"
-              }`}
-            >
-              {(call.output || "(empty)").slice(0, 2000)}
-            </pre>
+            {(call.tool === "edit_file" || call.tool === "write_file") &&
+            call.output &&
+            (call.output.includes("---") || call.output.includes("+++") || call.output.includes("@@") || call.output.startsWith("+") || call.output.startsWith("-")) ? (
+              <div className="mt-0.5">
+                <DiffViewer
+                  filePath={
+                    typeof call.input === "object" && call.input !== null
+                      ? (call.input as Record<string, unknown>).path as string | undefined
+                      : undefined
+                  }
+                  diff={call.output.slice(0, 5000)}
+                />
+              </div>
+            ) : (
+              <pre
+                className={`text-[10px] font-mono rounded p-1.5 mt-0.5 overflow-x-auto max-h-[120px] overflow-y-auto whitespace-pre-wrap break-all ${
+                  call.success
+                    ? "text-muted-foreground bg-muted/30"
+                    : "text-red-400 bg-red-500/5"
+                }`}
+              >
+                {(call.output || "(empty)").slice(0, 2000)}
+              </pre>
+            )}
           </div>
         </div>
       )}
