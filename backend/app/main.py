@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from app.config import settings
 from app.database import async_session, engine, init_db
 from app.routers import actions, artifacts, models, tasks
 from app.routers import agent_definitions, planner_config
+from app.services.iteration_cleanup import iteration_cleanup_loop
 
 
 @asynccontextmanager
@@ -35,7 +37,10 @@ async def lifespan(app: FastAPI):
     # Ensure ChromaDB persistence directory exists
     chroma_dir = Path(settings.CHROMA_PERSIST_DIR)
     chroma_dir.mkdir(parents=True, exist_ok=True)
+    # Start iteration cleanup background task
+    cleanup_task = asyncio.create_task(iteration_cleanup_loop())
     yield
+    cleanup_task.cancel()
     await engine.dispose()
 
 

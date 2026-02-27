@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     ARXIV_MAX_RESULTS: int = 10
     ARXIV_RAG_TOP_K: int = 5
+    ITERATION_RETENTION_DAYS: int = 30
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
