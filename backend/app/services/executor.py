@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Track running executors per action for cancellation
 _running_executors: dict[str, asyncio.Task] = {}
 
-# Maximum number of retry iterations per task before giving up
-_MAX_RETRY_ITERATIONS = 3
+# Maximum number of recovery attempts per task before giving up
+_MAX_RECOVERY_ATTEMPTS_PER_TASK = 3
 
 
 async def invalidate_downstream(
@@ -583,6 +583,143 @@ def _build_failure_history(failures: list[dict]) -> str:
     return "\n".join(lines)
 
 
+async def _triage_failure(
+    prompt: str,
+    agent_type: str,
+    error: str,
+    attempt: int,
+    prior_attempts: list[dict],
+) -> str:
+    """Ask a fast LLM whether to retry the same agent or spawn a recovery sub-action.
+
+    Returns 'retry' or 'recovery'.
+    """
+    from app.services.llm_client import chat_completion
+
+    prior_context = ""
+    if prior_attempts:
+        prior_lines = []
+        for p in prior_attempts:
+            prior_lines.append(
+                f"  Attempt {p['attempt']} ({p['strategy']}): {p['error'][:200]}"
+            )
+        prior_context = "\nPrevious recovery attempts:\n" + "\n".join(prior_lines)
+
+    system = (
+        "You are a failure triage system. A task has failed and you must decide the "
+        "best recovery strategy. Output ONLY one word: 'retry' or 'recovery'.\n\n"
+        "Choose 'retry' when:\n"
+        "- The error is transient (network timeout, rate limit, temporary unavailability)\n"
+        "- The error is a minor prompt issue the same agent can fix with better context\n"
+        "- The agent type is fundamentally correct for the task\n\n"
+        "Choose 'recovery' when:\n"
+        "- The error is deterministic (wrong API, missing capability, auth failure, bad approach)\n"
+        "- The same error has already occurred in a prior retry attempt\n"
+        "- The task needs a fundamentally different approach or decomposition\n"
+        "- The agent type may be wrong for this task"
+    )
+    user = (
+        f"Task: {prompt[:300]}\n"
+        f"Agent type: {agent_type}\n"
+        f"Error: {error[:500]}\n"
+        f"Attempt number: {attempt}"
+        f"{prior_context}"
+    )
+
+    try:
+        raw = await chat_completion(
+            "gpt-4o-mini",
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=10,
+            temperature=0.0,
+        )
+        decision = raw.strip().lower().rstrip(".")
+        if decision in ("retry", "recovery"):
+            return decision
+        # If the LLM returned something unexpected, default based on attempt number
+        return "retry" if attempt <= 1 else "recovery"
+    except Exception as e:
+        logger.warning(f"Triage LLM call failed: {e}, defaulting to retry")
+        return "retry" if attempt <= 1 else "recovery"
+
+
+async def _spawn_recovery_sub_action(
+    action_id: str,
+    task_id: str,
+    original_prompt: str,
+    original_agent_type: str,
+    error_message: str,
+    attempt: int,
+    max_attempts: int,
+    prior_attempts: list[dict],
+    dep_outputs: dict[str, str],
+    log_callback,
+) -> dict | None:
+    """Spawn a recovery sub-action that plans and executes a fix for the error.
+
+    Returns the sub-action agent's result dict on success, or None on failure.
+    """
+    from app.services.agents.sub_action_agent import SubActionAgent
+
+    prior_context = ""
+    if prior_attempts:
+        prior_context = (
+            "\n\nPrevious recovery attempts that also failed:\n"
+            + "\n".join(
+                f"  Attempt {p['attempt']} ({p['strategy']}): {p['error'][:200]}"
+                for p in prior_attempts
+            )
+            + "\n\nDo NOT repeat any of these approaches. Try something fundamentally different."
+        )
+
+    recovery_prompt = (
+        f"[ERROR RECOVERY — Attempt {attempt}]\n\n"
+        f"A task in a workflow has failed and needs to be fixed.\n\n"
+        f"Original task goal: {original_prompt}\n"
+        f"Agent type that failed: {original_agent_type}\n"
+        f"Error message:\n{error_message[:800]}\n"
+        f"{prior_context}\n\n"
+        f"Your mission: Achieve the SAME goal as the original task, but work around "
+        f"the error. Plan multiple steps if needed:\n"
+        f"1. Diagnose why the error occurred\n"
+        f"2. Use an alternative approach, different data source, or different method\n"
+        f"3. Produce the output that the original task was supposed to produce\n\n"
+        f"The downstream workflow depends on your output — it must fulfill the same "
+        f"contract as the original task."
+    )
+
+    if log_callback:
+        await log_callback(
+            "info",
+            f"Spawning recovery sub-action (attempt {attempt}/{max_attempts}): "
+            f"{error_message[:100]}",
+        )
+
+    await event_bus.publish(action_id, "task.recovering", {
+        "task_id": task_id,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "error": error_message[:200],
+    })
+
+    try:
+        agent = SubActionAgent()
+        result = await agent.execute(
+            task_id, recovery_prompt, dep_outputs, log_callback
+        )
+        return result
+    except Exception as recovery_err:
+        if log_callback:
+            await log_callback(
+                "error",
+                f"Recovery sub-action attempt {attempt} failed: {recovery_err}",
+            )
+        return None
+
+
 async def _run_task(
     action_id: str,
     task_id: str,
@@ -686,113 +823,133 @@ async def _run_task(
         db.add(iteration)
         await db.commit()
 
-    # ── Retry loop — re-invoke same agent with failure history ────────────
+    # ── LLM-triaged recovery loop ───────────────────────────────────────
+    # An LLM decides per-attempt whether to retry (same agent, augmented
+    # prompt) or spawn a recovery sub-action (full re-plan with different
+    # approach).  This avoids blindly retrying deterministic failures.
     await log_callback("warn", f"Primary agent failed: {first_error[:200]}")
-    await log_callback("info", f"Starting retry loop (up to {_MAX_RETRY_ITERATIONS} retries)...")
+    await log_callback("info", f"Starting recovery (up to {_MAX_RECOVERY_ATTEMPTS_PER_TASK} attempts, LLM-triaged)...")
 
-    await event_bus.publish(action_id, "task.retry_loop.started", {
+    await event_bus.publish(action_id, "task.recovery.started", {
         "task_id": task_id,
-        "max_attempts": _MAX_RETRY_ITERATIONS,
+        "max_attempts": _MAX_RECOVERY_ATTEMPTS_PER_TASK,
         "original_error": first_error[:300],
     })
 
-    failure_history: list[dict] = [
-        {"attempt": 0, "loop_type": "primary", "error": first_error, "summary": None},
-    ]
+    prior_attempts: list[dict] = []
+    last_error = first_error
 
-    for retry_num in range(1, _MAX_RETRY_ITERATIONS + 1):
-        await event_bus.publish(action_id, "task.retry_loop.iteration", {
-            "task_id": task_id,
-            "attempt": retry_num,
-            "max_attempts": _MAX_RETRY_ITERATIONS,
-        })
+    for attempt_num in range(1, _MAX_RECOVERY_ATTEMPTS_PER_TASK + 1):
+        # ── Triage: ask LLM which strategy to use ────────────────────
+        strategy = await _triage_failure(
+            prompt, agent_type, last_error, attempt_num, prior_attempts
+        )
         await log_callback(
             "info",
-            f"Retry {retry_num}/{_MAX_RETRY_ITERATIONS}: re-invoking {agent_type} agent with failure context",
+            f"Attempt {attempt_num}/{_MAX_RECOVERY_ATTEMPTS_PER_TASK}: "
+            f"LLM triage chose '{strategy}'",
         )
 
-        # Build augmented prompt with structured failure history
-        history_block = _build_failure_history(failure_history)
-        retry_prompt = f"{history_block}\n{effective_prompt}"
+        await event_bus.publish(action_id, "task.recovery.attempt", {
+            "task_id": task_id,
+            "attempt": attempt_num,
+            "max_attempts": _MAX_RECOVERY_ATTEMPTS_PER_TASK,
+            "strategy": strategy,
+        })
 
-        retry_start = time.monotonic()
-        retry_error: str | None = None
-        try:
-            async with async_session() as db:
-                agent = await get_agent_async(agent_type, db)
-            result = await agent.execute(
-                task_id, retry_prompt, dep_outputs, log_callback, model=model
-            )
+        attempt_start = time.monotonic()
+        attempt_error: str | None = None
+        result = None
 
-            retry_duration = int((time.monotonic() - retry_start) * 1000)
+        if strategy == "retry":
+            # ── Retry: same agent, augmented prompt ──────────────────
+            failure_history = [
+                {"attempt": 0, "loop_type": "primary", "error": first_error, "summary": None},
+                *[
+                    {"attempt": p["attempt"], "loop_type": p["strategy"], "error": p["error"], "summary": None}
+                    for p in prior_attempts
+                ],
+            ]
+            history_block = _build_failure_history(failure_history)
+            retry_prompt = f"{history_block}\n{effective_prompt}"
 
-            # Record successful retry iteration
-            async with async_session() as db:
-                iteration = AgentIteration(
-                    task_id=task_id,
-                    action_id=action_id,
-                    iteration_number=retry_num + 1,  # 1-based, primary was 1
-                    loop_type="retry",
-                    attempt_number=retry_num,
-                    reasoning=f"Retry {retry_num}: re-invoked {agent_type} with failure history",
-                    tool_calls=[],
-                    outcome="completed",
-                    duration_ms=retry_duration,
+            try:
+                async with async_session() as db:
+                    agent = await get_agent_async(agent_type, db)
+                result = await agent.execute(
+                    task_id, retry_prompt, dep_outputs, log_callback, model=model
                 )
-                db.add(iteration)
-                await db.commit()
+            except Exception as e:
+                attempt_error = str(e)
 
-            await log_callback("info", f"Retry {retry_num} succeeded!")
-            await _save_task_success(action_id, task_id, result)
-            return
-
-        except Exception as e:
-            retry_error = str(e)
-            retry_duration = int((time.monotonic() - retry_start) * 1000)
-            logger.warning(
-                f"Task {task_id} retry {retry_num} failed: {retry_error[:200]}"
+        else:
+            # ── Recovery: spawn sub-action with full re-planning ─────
+            recovery_result = await _spawn_recovery_sub_action(
+                action_id=action_id,
+                task_id=task_id,
+                original_prompt=prompt,
+                original_agent_type=agent_type,
+                error_message=last_error,
+                attempt=attempt_num,
+                max_attempts=_MAX_RECOVERY_ATTEMPTS_PER_TASK,
+                prior_attempts=prior_attempts,
+                dep_outputs=dep_outputs,
+                log_callback=log_callback,
             )
+            if recovery_result is not None:
+                result = recovery_result
+            else:
+                attempt_error = f"Recovery sub-action attempt {attempt_num} returned no result"
 
-        # Record failed retry iteration
+        attempt_duration = int((time.monotonic() - attempt_start) * 1000)
+
+        # ── Record iteration ─────────────────────────────────────────
+        outcome = "completed" if result is not None else "failed"
         async with async_session() as db:
             iteration = AgentIteration(
                 task_id=task_id,
                 action_id=action_id,
-                iteration_number=retry_num + 1,
-                loop_type="retry",
-                attempt_number=retry_num,
-                reasoning=f"Retry {retry_num}: re-invoked {agent_type} with failure history",
+                iteration_number=attempt_num + 1,  # primary was 1
+                loop_type=strategy,
+                attempt_number=attempt_num,
+                reasoning=f"Attempt {attempt_num} ({strategy}): "
+                          f"{'succeeded' if result else attempt_error or 'unknown error'}",
                 tool_calls=[],
-                outcome="failed",
-                error=(retry_error or "Unknown error")[:2000],
-                duration_ms=retry_duration,
+                outcome=outcome,
+                error=(attempt_error or "")[:2000] if attempt_error else None,
+                duration_ms=attempt_duration,
             )
             db.add(iteration)
             await db.commit()
 
-        failure_history.append({
-            "attempt": retry_num,
-            "loop_type": "retry",
-            "error": retry_error or "Unknown error",
-            "summary": f"Re-invoked {agent_type} agent with failure context",
+        if result is not None:
+            await log_callback("info", f"Attempt {attempt_num} ({strategy}) succeeded!")
+            await _save_task_success(action_id, task_id, result)
+            return
+
+        # Failed — record and continue
+        last_error = attempt_error or "Unknown error"
+        prior_attempts.append({
+            "attempt": attempt_num,
+            "strategy": strategy,
+            "error": last_error,
         })
 
-        if retry_num < _MAX_RETRY_ITERATIONS:
+        if attempt_num < _MAX_RECOVERY_ATTEMPTS_PER_TASK:
             await log_callback(
                 "warn",
-                f"Retry {retry_num} failed, trying again "
-                f"({retry_num}/{_MAX_RETRY_ITERATIONS})...",
+                f"Attempt {attempt_num} ({strategy}) failed: {last_error[:150]}",
             )
 
-    # ── All retries exhausted — mark as truly failed ─────────────────────
+    # ── All attempts exhausted — mark as truly failed ─────────────────
     await log_callback(
         "error",
-        f"All {_MAX_RETRY_ITERATIONS} retry attempts failed. Task is failed.",
+        f"All {_MAX_RECOVERY_ATTEMPTS_PER_TASK} recovery attempts failed. Task is failed.",
     )
 
-    await event_bus.publish(action_id, "task.retry_loop.exhausted", {
+    await event_bus.publish(action_id, "task.recovery.exhausted", {
         "task_id": task_id,
-        "attempts": _MAX_RETRY_ITERATIONS,
+        "attempts": _MAX_RECOVERY_ATTEMPTS_PER_TASK,
         "original_error": first_error[:300],
     })
 
@@ -802,14 +959,15 @@ async def _run_task(
         task.status = "failed"
         task.output_summary = (
             f"Original error: {first_error[:300]}\n\n"
-            f"Retry loop exhausted after {_MAX_RETRY_ITERATIONS} attempts."
+            f"Recovery exhausted after {_MAX_RECOVERY_ATTEMPTS_PER_TASK} attempts "
+            f"(strategies tried: {', '.join(p['strategy'] for p in prior_attempts)})."
         )
         await db.commit()
 
     await event_bus.publish(action_id, "task.failed", {
         "task_id": task_id,
         "error": first_error[:300],
-        "retry_attempts": _MAX_RETRY_ITERATIONS,
+        "recovery_attempts": _MAX_RECOVERY_ATTEMPTS_PER_TASK,
     })
 
 

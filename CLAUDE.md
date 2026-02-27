@@ -534,7 +534,7 @@ Agents propose. The system executes. The user can intervene at any moment.
 ### Completed
 
 **Core workflow (Steps 1–4 complete)**
-- Action + Task + TaskOutput + Artifact + Log models (SQLite/aiosqlite)
+- Action + Task + TaskOutput + Artifact + Log + AgentIteration models (SQLite/aiosqlite)
 - LLM planner: OpenAI structured output (`response_format=PlannerOutput`), retry + fallback
 - DAG executor: `asyncio.gather` for parallel tasks, BFS invalidation on edit, restart from any task
 - SSE stream: snapshot on connect + live `task.started / completed / failed / log.append` events
@@ -549,9 +549,10 @@ Agents propose. The system executes. The user can intervene at any moment.
 - AI-modify panel: describe a change in plain English → LLM rewrites code → user reviews
 - Endpoints: CRUD + `/scaffold` + `/:id/modify`
 
-**7 Real built-in agents** (all `is_builtin=True`, seeded at startup)
+**8 Real built-in agents** (all `is_builtin=True`, seeded at startup)
 - `arxiv_search`: arXiv API + ChromaDB semantic search + LLM synthesis with citations
 - `code_execution`: LLM-generated Python → sandboxed subprocess → plots/files as artifacts; **auto-installs PyPI packages** (pre-scan imports, 70+ pip name mappings, stdlib guard, multi-round retry)
+- `coding`: LLM-driven agentic coding loop in an isolated git worktree; tools: read_file, write_file, edit_file, glob, grep, bash; up to 50 iterations; produces git diff + change summary artifacts
 - `data_retrieval`: LLM plans queries → DuckDuckGo → fetch pages → HTML tables/CSV/JSON/Excel → LLM synthesis
 - `spreadsheet`: LLM-generated openpyxl code → real `.xlsx` with formatting + Summary sheet → artifact download
 - `report`: extract findings (parallel) → outline → write sections (parallel) → assemble with images + LaTeX
@@ -565,11 +566,29 @@ Agents propose. The system executes. The user can intervene at any moment.
 - Progress events forwarded from child to parent action's SSE stream
 - API: `GET /actions/:id/breadcrumbs` returns parent chain (root first)
 
-**Inline error recovery**
-- On task failure, executor spawns recovery sub-actions iteratively (up to 3 attempts) before marking as failed
-- Recovery prompt includes original goal, error message, and prior failed attempts
-- SSE event `task.recovering` with attempt/max_attempts/error for live UI feedback
-- Outer DAG recovery (`_attempt_recovery`, `_full_replan`) remains as safety net after inline recovery exhausted
+**LLM-triaged error recovery**
+- On task failure, a fast LLM call (`gpt-4o-mini`) triages the error and picks a strategy:
+  - **retry**: same agent re-invoked with failure history injected into prompt (for transient errors)
+  - **recovery**: full sub-action spawned with its own planner-generated DAG (for deterministic failures needing a different approach)
+- Up to 3 attempts, each independently triaged by the LLM
+- `AgentIteration` records track every attempt with strategy, duration, and outcome
+- SSE events: `task.recovering`, `task.recovery.started`, `task.recovery.attempt` (with strategy), `task.recovery.exhausted`
+- Outer DAG recovery (`_attempt_recovery`, `_full_replan`) remains as safety net after per-task recovery exhausted
+
+**Pause/resume**
+- Tasks can be paused mid-execution, user provides guidance, then resumes
+- SSE events: `task.paused`, `task.resumed`
+
+**Iteration history**
+- `agent_iterations` table tracks every execution attempt per task
+- Each record has: iteration_number, loop_type (primary/retry/recovery), attempt_number, reasoning, tool_calls, outcome, error, duration_ms
+- API: `GET /actions/:id/tasks/:taskId/iterations`
+- Frontend: expandable iteration timeline with terminal output viewer and file diff viewer
+
+**Agent memory**
+- Per-agent-type persistent lessons from failures stored at `backend/data/agent_memory/{agent_type}.md`
+- On failure, a fast LLM generates/revises actionable lessons
+- Lessons injected into subsequent task prompts for the same agent type
 
 **Auto-run**
 - Actions execute immediately after prompt submission (no manual "Run" button)

@@ -7,15 +7,18 @@ A Google Docs-inspired platform for **agentic workflows**. Describe what you wan
 ## Key Features
 
 - **Action workspace** — prompt → planner → editable task DAG → parallel execution
-- **7 real built-in agents** — arXiv search, code execution (auto-installs deps), data retrieval, spreadsheet, report, general, sub-action
+- **8 real built-in agents** — arXiv search, code execution (auto-installs deps), coding (agentic loop with git worktree), data retrieval, spreadsheet, report, general, sub-action
 - **Agent Studio** — create, edit, and AI-modify custom agents with generated Python code
 - **Planner dashboard** — configure the planning model, system prompt, max tasks, and preview plans
 - **Multi-model LLM support** — OpenAI (GPT-5, GPT-4.1, o3/o4), Anthropic (Claude 4.6), Google (Gemini 2.5), DeepSeek
 - **Real-time updates** — Server-Sent Events stream task status, logs, and outputs live
 - **Live activity feed** — inline log display on running tasks with auto-scroll
 - **Auto-run** — actions execute immediately after prompt submission
-- **Inline error recovery** — on task failure, spawns recovery sub-actions iteratively (up to 3 attempts)
+- **LLM-triaged error recovery** — on failure, an LLM decides whether to retry (same agent, augmented prompt) or spawn a recovery sub-action (full re-planning with different approach)
 - **Sub-actions** — hierarchical child workflows with breadcrumb navigation (max depth 3)
+- **Coding agent** — LLM-driven agentic coding loop in an isolated git worktree with tools: read_file, write_file, edit_file, glob, grep, bash
+- **Pause/resume** — pause running tasks, provide guidance, and resume
+- **Iteration history** — track every retry/recovery attempt with structured AgentIteration records
 - **Artifact system** — agents produce downloadable files (plots, .xlsx, .csv, JSON) stored as artifacts
 - **Inline rendering** — Markdown, LaTeX math ($...$ / $$...$$), and inline images in task outputs
 
@@ -42,6 +45,7 @@ A Google Docs-inspired platform for **agentic workflows**. Describe what you wan
 |---|---|---|
 | 📚 ArXiv Search | `arxiv_search` | Searches arXiv API, stores embeddings in ChromaDB, synthesises literature review with citations |
 | ⚙️ Code Execution | `code_execution` | LLM generates Python, runs in sandboxed subprocess, saves plots/files as artifacts |
+| 💻 Coding | `coding` | LLM-driven agentic loop in a git worktree — iteratively plans, writes code, runs tests, debugs (up to 50 iterations) |
 | 🌐 Data Retrieval | `data_retrieval` | LLM plans queries → DuckDuckGo search → fetches pages, extracts HTML tables, CSV, JSON, Excel → LLM synthesis |
 | 📊 Spreadsheet | `spreadsheet` | LLM generates openpyxl code → real .xlsx with formatted headers, frozen rows, summary sheet, artifact download |
 | 📝 Report | `report` | Multi-step: extract findings (parallel) → outline → write sections (parallel) → assemble with images + LaTeX |
@@ -49,6 +53,20 @@ A Google Docs-inspired platform for **agentic workflows**. Describe what you wan
 | 🔀 Sub-Action | `sub_action` | Spawns a child action with its own planner-generated DAG; artifact propagation, progress forwarding (max depth 3) |
 
 All agents accept upstream task outputs as context and pass them to downstream tasks.
+
+---
+
+## Error Recovery: LLM-Triaged Strategy
+
+When a task fails, the executor doesn't blindly retry. Instead:
+
+1. A fast LLM call (`gpt-4o-mini`) triages the failure, classifying it as:
+   - **`retry`** — transient error (network timeout, rate limit, minor prompt issue). Same agent re-runs with failure history injected into the prompt.
+   - **`recovery`** — deterministic failure (wrong approach, missing capability, auth error). A full recovery sub-action is spawned with its own planner-generated DAG and potentially different agent types.
+
+2. Up to 3 attempts, each independently triaged. A typical sequence might be: attempt 1 → retry, attempt 2 → recovery, attempt 3 → recovery.
+
+3. `AgentIteration` records track every attempt with strategy used, duration, and outcome.
 
 ---
 
@@ -164,13 +182,14 @@ The frontend connects to the backend at `http://localhost:8001` by default. Over
 | `POST` | `/actions/:id/tasks` | Add a task |
 | `PATCH` | `/actions/:id/tasks/:taskId` | Edit task (invalidates downstream) |
 | `GET` | `/actions/:id/tasks/:taskId/logs` | Task logs |
+| `GET` | `/actions/:id/tasks/:taskId/iterations` | Iteration history |
 
 ### Agent Studio
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/agent-definitions` | List all agents (builtins + custom) |
-| `GET` | `/agent-definitions/tools` | Tool catalog (8 entries) |
+| `GET` | `/agent-definitions/tools` | Tool catalog |
 | `GET` | `/agent-definitions/:id` | Single agent |
 | `POST` | `/agent-definitions` | Create custom agent |
 | `PATCH` | `/agent-definitions/:id` | Update agent |
@@ -205,11 +224,15 @@ The frontend connects to the backend at `http://localhost:8001` by default. Over
 | `snapshot` | Full action + tasks state on connect |
 | `task.started` | `{ task_id, action_id }` |
 | `task.completed` | `{ task_id, output_summary, artifact_ids }` |
-| `task.failed` | `{ task_id, error, retry_count }` |
+| `task.failed` | `{ task_id, error, recovery_attempts }` |
+| `task.recovering` | `{ task_id, attempt, max_attempts, error }` |
+| `task.recovery.started` | `{ task_id, max_attempts, original_error }` |
+| `task.recovery.attempt` | `{ task_id, attempt, max_attempts, strategy }` |
+| `task.recovery.exhausted` | `{ task_id, attempts, original_error }` |
+| `task.paused` | `{ task_id }` |
+| `task.resumed` | `{ task_id }` |
 | `log.append` | `{ task_id, level, message }` |
 | `action.completed` | `{ action_id }` |
-| `task.recovering` | `{ task_id, attempt, max_attempts, error }` |
-| `task.recovered` | `{ task_id }` |
 | `action.started` | `{ action_id }` |
 | `action.failed` | `{ action_id, reason }` |
 | `action.retrying` | `{ action_id, attempt }` |
@@ -232,9 +255,11 @@ backend/
     models/
       action.py               # Action model
       task.py                 # Task model
-      task_output.py          # TaskOutput + Artifact models
+      task_output.py          # TaskOutput model
+      artifact.py             # Artifact model
       log.py                  # Log model
       agent_definition.py     # Custom/builtin agent definitions
+      agent_iteration.py      # AgentIteration model (retry/recovery tracking)
       planner_config.py       # Planner config singleton
     schemas/
       task.py                 # Task create/update schemas
@@ -243,7 +268,7 @@ backend/
       planner_config.py       # Planner config schemas
     routers/
       actions.py              # Action CRUD + run + SSE
-      tasks.py                # Task create/edit + logs
+      tasks.py                # Task create/edit + logs + iterations
       artifacts.py            # Artifact download
       agent_definitions.py    # Agent Studio CRUD + scaffold
       planner_config.py       # Planner config endpoints
@@ -251,28 +276,32 @@ backend/
     services/
       llm_client.py           # Unified multi-provider LLM client
       planner.py              # DAG planner (OpenAI structured output)
-      executor.py             # Async DAG executor with inline recovery
+      executor.py             # Async DAG executor with LLM-triaged recovery
       recovery_planner.py     # Recovery planning for failed tasks
       event_bus.py            # In-process pub/sub for SSE
       code_runner.py          # Sandboxed subprocess Python runner
       arxiv_service.py        # arXiv API + ChromaDB vector store
       vector_store.py         # ChromaDB wrapper
+      pause_manager.py        # Task pause/resume state management
+      worktree_manager.py     # Git worktree lifecycle for coding agent
       planner_config_seed.py  # Seed default planner config on boot
       agents/
         base.py               # Abstract BaseAgent
         mock_agent.py         # LLM-based mock (fallback for unknown types)
         arxiv_search_agent.py # arXiv RAG agent
         code_execution_agent.py  # Sandboxed code agent
+        coding_agent.py       # Agentic coding loop (git worktree + tools)
+        coding_tools.py       # Tool implementations for coding agent
         data_retrieval_agent.py  # Web search + table extraction agent
         spreadsheet_agent.py  # openpyxl .xlsx generation agent
         report_agent.py       # Multi-step report synthesis agent
         general_agent.py      # Chain-of-thought reasoning agent
         sub_action_agent.py   # Hierarchical child workflow agent
-        agent_memory.py       # Agent memory utilities
+        agent_memory.py       # Per-agent persistent failure lessons
         exceptions.py         # Agent-specific exceptions
         scaffolding_service.py   # LLM code generation for custom agents
-        tool_catalog.py       # Static tool catalog (8 tools)
-        seed_builtins.py      # Seed 7 builtin agents on boot
+        tool_catalog.py       # Static tool catalog
+        seed_builtins.py      # Seed 8 builtin agents on boot
         registry.py           # Agent factory (DB-first, then native, then mock)
 
 frontend/
@@ -290,7 +319,7 @@ frontend/
       agents/                 # AgentCard, AgentBuilderForm, ToolSelector
       ui/                     # ShadCN components
     lib/api/                  # API client functions (actions, tasks, models, agents, planner)
-    hooks/                    # TanStack Query hooks
+    hooks/                    # TanStack Query hooks + SSE event handler
     stores/                   # Zustand store (real-time SSE state overlay)
     types/index.ts            # TypeScript interfaces
 ```
@@ -301,7 +330,7 @@ frontend/
 
 ### Using Built-in Agents
 
-All 7 built-in agents are pre-seeded at startup. Pick an agent type in the task editor dropdown. The planner automatically assigns appropriate agent types when decomposing prompts.
+All 8 built-in agents are pre-seeded at startup. Pick an agent type in the task editor dropdown. The planner automatically assigns appropriate agent types when decomposing prompts.
 
 ### Creating Custom Agents
 

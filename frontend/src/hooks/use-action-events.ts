@@ -221,20 +221,21 @@ export function useActionEvents(actionId: string, enabled = true) {
             });
             break;
 
-          // --- Retry loop events ---
-          case "task.retry_loop.started":
+          // --- Recovery events (LLM-triaged retry/sub-action) ---
+          case "task.recovery.started":
             setRetryStatus(data.task_id as string, {
               attempt: 1,
               max_attempts: data.max_attempts as number,
             });
             break;
-          case "task.retry_loop.iteration":
+          case "task.recovery.attempt":
             setRetryStatus(data.task_id as string, {
               attempt: data.attempt as number,
               max_attempts: data.max_attempts as number,
+              strategy: data.strategy as string,
             });
             break;
-          case "task.retry_loop.exhausted":
+          case "task.recovery.exhausted":
             setRetryStatus(data.task_id as string, {
               attempt: data.max_attempts as number,
               max_attempts: data.max_attempts as number,
