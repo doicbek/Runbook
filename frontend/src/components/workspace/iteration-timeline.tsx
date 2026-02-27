@@ -5,6 +5,7 @@ import { useActionStore } from "@/stores/action-store";
 import type { RetryStatus } from "@/stores/action-store";
 import type { AgentIteration, AgentIterationToolCall } from "@/types";
 import { DiffViewer } from "./diff-viewer";
+import { TerminalViewer } from "./terminal-viewer";
 
 const toolIcons: Record<string, string> = {
   read_file: "📄",
@@ -34,6 +35,30 @@ function iterationSummaryLine(iteration: AgentIteration): string {
   let line = uniqueTools.join(", ");
   if (failed > 0) line += ` (${failed} failed)`;
   return line;
+}
+
+function parseBashOutput(
+  output: string | undefined,
+  success: boolean
+): { stdout?: string; stderr?: string; exitCode?: number } {
+  if (!output) return { exitCode: success ? 0 : 1 };
+  try {
+    const parsed = JSON.parse(output);
+    if (typeof parsed === "object" && parsed !== null && ("stdout" in parsed || "stderr" in parsed)) {
+      return {
+        stdout: parsed.stdout || undefined,
+        stderr: parsed.stderr || undefined,
+        exitCode: typeof parsed.exit_code === "number" ? parsed.exit_code : (success ? 0 : 1),
+      };
+    }
+  } catch {
+    // Not JSON — treat as raw output
+  }
+  return {
+    stdout: success ? output : undefined,
+    stderr: !success ? output : undefined,
+    exitCode: success ? 0 : 1,
+  };
 }
 
 function ToolCallDetail({ call }: { call: AgentIterationToolCall }) {
@@ -97,6 +122,17 @@ function ToolCallDetail({ call }: { call: AgentIterationToolCall }) {
                       : undefined
                   }
                   diff={call.output.slice(0, 5000)}
+                />
+              </div>
+            ) : call.tool === "bash" ? (
+              <div className="mt-0.5">
+                <TerminalViewer
+                  command={
+                    typeof call.input === "object" && call.input !== null
+                      ? (call.input as Record<string, unknown>).command as string | undefined
+                      : undefined
+                  }
+                  {...parseBashOutput(call.output, call.success)}
                 />
               </div>
             ) : (
