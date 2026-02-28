@@ -547,7 +547,7 @@ async def _transform_to_acquisition(
 async def _compress_for_handoff(raw_output: str) -> str:
     """Compress verbose task output into a dense summary for downstream agents.
 
-    Only compresses outputs longer than 800 chars. Uses gpt-4o-mini for fast,
+    Only compresses outputs longer than 800 chars. Uses gpt-5-mini for fast,
     cheap compression that preserves all critical data (numbers, paths, artifacts,
     column names, tabular structure). Falls back to truncation on LLM failure.
     """
@@ -578,7 +578,7 @@ async def _compress_for_handoff(raw_output: str) -> str:
 
     try:
         compressed = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": raw_output[:_INPUT_CAP]},
@@ -686,7 +686,7 @@ async def _triage_failure(
 
     try:
         raw = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

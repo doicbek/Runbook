@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./actions.db"
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_MODEL: str = "gpt-5"
     ANTHROPIC_API_KEY: str = ""
     DEEPSEEK_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""

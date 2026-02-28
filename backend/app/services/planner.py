@@ -31,8 +31,8 @@ Agent type guidelines:
 - "sub_action": Spawn a child action with its own multi-step planner-generated DAG. Use ONLY when a sub-problem is itself so complex that it requires multiple coordinated steps (e.g., a full research-then-analysis sub-workflow, or a multi-stage data pipeline with its own report). The task prompt must clearly describe the goal and expected output. Do NOT use sub_action for simple single-step tasks — prefer a direct agent type instead. Max nesting depth: 3 levels.
 
 Available LLM models and their strengths:
-- "openai/gpt-4o": Good all-rounder (default for general tasks)
-- "openai/gpt-4o-mini": Fast and cheap, good for simple structured tasks (default for data_retrieval, spreadsheet)
+- "openai/gpt-5": Good all-rounder, strong reasoning (default for general tasks)
+- "openai/gpt-5-mini": Fast and cheap, good for simple structured tasks
 - "anthropic/claude-sonnet-4-5-20250929": Excellent at research synthesis, writing, and long-form content (default for arxiv_search, report)
 - "deepseek/deepseek-chat": Best at code generation (default for code_execution)
 - "google/gemini-2.0-flash": Fast, good for general tasks

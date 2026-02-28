@@ -45,7 +45,7 @@ async def generate_and_save_lesson(
 
     try:
         lesson = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {
                     "role": "system",

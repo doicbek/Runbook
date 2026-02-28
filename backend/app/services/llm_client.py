@@ -149,15 +149,16 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 
 DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
     "arxiv_search": "anthropic/claude-sonnet-4-6",
-    "code_execution": "openai/gpt-4.1",      # gpt-5 refuses code gen; gpt-4.1 is SOTA for code
+    "code_execution": "openai/gpt-5",
     "report": "anthropic/claude-sonnet-4-6",
-    "data_retrieval": "openai/gpt-4.1-mini",
-    "spreadsheet": "openai/gpt-4.1",
+    "data_retrieval": "openai/gpt-5-mini",
+    "spreadsheet": "openai/gpt-5",
     "coding": "anthropic/claude-sonnet-4-6",   # Claude excellent for agentic coding loops
-    "general": "openai/gpt-5",               # gpt-5 fine for reasoning; not code gen
+    "general": "openai/gpt-5",
+    "mcp": "openai/gpt-5",
 }
 
-FALLBACK_MODEL = "openai/gpt-4.1"
+FALLBACK_MODEL = "openai/gpt-5"
 
 
 def _get_api_key(setting_name: str) -> str:
@@ -170,7 +171,7 @@ def get_default_model_for_agent(agent_type: str) -> str:
     config = MODEL_REGISTRY.get(model_name)
     if config and _get_api_key(config.api_key_setting):
         return model_name
-    # Fallback to openai/gpt-4o if preferred model's key is missing
+    # Fallback if preferred model's key is missing
     fallback_config = MODEL_REGISTRY.get(FALLBACK_MODEL)
     if fallback_config and _get_api_key(fallback_config.api_key_setting):
         return FALLBACK_MODEL

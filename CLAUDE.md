@@ -567,7 +567,7 @@ Agents propose. The system executes. The user can intervene at any moment.
 - API: `GET /actions/:id/breadcrumbs` returns parent chain (root first)
 
 **LLM-triaged error recovery**
-- On task failure, a fast LLM call (`gpt-4o-mini`) triages the error and picks a strategy:
+- On task failure, a fast LLM call (`gpt-5-mini`) triages the error and picks a strategy:
   - **retry**: same agent re-invoked with failure history injected into prompt (for transient errors)
   - **recovery**: full sub-action spawned with its own planner-generated DAG (for deterministic failures needing a different approach)
 - Up to 3 attempts, each independently triaged by the LLM

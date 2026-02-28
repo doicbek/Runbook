@@ -11,7 +11,7 @@ class PlannerConfig(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-4o")
+    model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-5")
     max_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     updated_at: Mapped[datetime] = mapped_column(

@@ -48,7 +48,7 @@ async def generate_skill_from_success(
 
     try:
         raw = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {
                     "role": "system",
@@ -167,7 +167,7 @@ async def generate_skill_from_failure(
 
     try:
         raw = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {
                     "role": "system",
@@ -285,7 +285,7 @@ async def generate_correction_skill(
 
     try:
         raw = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {
                     "role": "system",
@@ -467,7 +467,7 @@ async def _refine_description(existing: str, new: str) -> str:
 
     try:
         refined = await chat_completion(
-            "gpt-4o-mini",
+            "gpt-5-mini",
             [
                 {
                     "role": "system",
