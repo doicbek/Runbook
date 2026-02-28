@@ -156,6 +156,48 @@ async def scaffold_agent(body: ScaffoldRequest):
     )
 
 
+@router.post("/{agent_id}/test-mcp")
+async def test_mcp_connection(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """Connect to the agent's configured MCP servers, list tools, and return status."""
+    result = await db.execute(
+        select(AgentDefinition).where(AgentDefinition.id == agent_id)
+    )
+    defn = result.scalar_one_or_none()
+    if not defn:
+        raise HTTPException(status_code=404, detail="Agent definition not found")
+
+    mcp_config = defn.mcp_config
+    if not mcp_config or not mcp_config.get("servers"):
+        raise HTTPException(status_code=400, detail="No MCP servers configured on this agent")
+
+    from app.services.mcp_client import MCPServerConfig, MCPSession
+
+    session = MCPSession()
+    configs = [MCPServerConfig.from_dict(s) for s in mcp_config["servers"]]
+
+    try:
+        await session.connect(configs)
+        tools = await session.list_tools()
+        return {
+            "status": "ok",
+            "servers_connected": len(session._handles),
+            "servers_configured": len(configs),
+            "tools": [
+                {
+                    "server": t.server_name,
+                    "name": t.name,
+                    "prefixed_name": t.openai_schema["function"]["name"],
+                }
+                for t in tools
+            ],
+            "tool_count": len(tools),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MCP connection failed: {e}")
+    finally:
+        await session.close()
+
+
 @router.post("/{agent_id}/modify", response_model=ModifyResponse)
 async def modify_agent(
     agent_id: str,

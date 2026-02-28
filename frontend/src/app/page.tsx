@@ -1,47 +1,56 @@
 "use client";
 
-import Link from "next/link";
-import { ActionList } from "@/components/action-list";
-import { CreateActionDialog } from "@/components/create-action-dialog";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCreateAction } from "@/hooks/use-actions";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function HomePage() {
+  const [prompt, setPrompt] = useState("");
+  const router = useRouter();
+  const createAction = useCreateAction();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+    const action = await createAction.mutateAsync({
+      root_prompt: prompt.trim(),
+    });
+    setPrompt("");
+    router.push(`/actions/${action.id}`);
+  };
+
   return (
-    <main className="min-h-screen bg-background">
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Runbook</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Agentic workflows
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Link href="/agents">
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <circle cx="8" cy="6" r="2.5" />
-                  <path d="M3 14c0-2.76 2.24-5 5-5s5 2.24 5 5" strokeLinecap="round" />
-                  <path d="M6 6h0M10 6h0" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                Agents
-              </Button>
-            </Link>
-            <Link href="/planner">
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M3 4h10M5 8h6M7 12h2" strokeLinecap="round" />
-                </svg>
-                Planner
-              </Button>
-            </Link>
-            <CreateActionDialog />
-          </div>
-        </div>
-        <ActionList />
+    <div className="flex flex-col items-center justify-center h-full px-4">
+      <div className="absolute top-3 right-3">
+        <ThemeToggle />
       </div>
-    </main>
+      <div className="w-full max-w-lg text-center">
+        <h2 className="text-lg font-semibold text-foreground mb-1">
+          Select an action or create a new one
+        </h2>
+        <p className="text-sm text-muted-foreground mb-6">
+          Choose from the sidebar, or describe a workflow below.
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <Textarea
+            placeholder="Describe what you want to accomplish..."
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={3}
+            className="resize-none text-sm"
+          />
+          <Button
+            type="submit"
+            disabled={!prompt.trim() || createAction.isPending}
+            className="w-full"
+          >
+            {createAction.isPending ? "Creating..." : "Create Action"}
+          </Button>
+        </form>
+      </div>
+    </div>
   );
 }

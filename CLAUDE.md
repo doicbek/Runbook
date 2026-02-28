@@ -607,6 +607,15 @@ Agents propose. The system executes. The user can intervene at any moment.
 - Frontend: `/skills` page with category/agent-type filters, priority indicators, recurrence badges, inline edit with priority/status, stats bar
 - Agent detail page (`/agents/:id`) shows skills section with category badges and toggle
 
+**Skill ontology (knowledge graph)**
+- `skill_relations` + `skill_concepts` DB tables — typed knowledge graph linking skills to domain concepts
+- Concept types: `tool`, `library`, `api`, `data_format`, `anti_pattern`, `technique`
+- Relation types: `depends_on`, `supersedes`, `related_to`, `fixes`, `uses_tool`, `produces`, `avoids`
+- Auto-extraction: when a skill is created, LLM extracts concepts and creates `uses_tool`/`produces`/`avoids` relations
+- API: `GET/POST/DELETE /skills/ontology/concepts`, `GET/POST/DELETE /skills/ontology/relations`, `GET /skills/ontology/graph`
+- Frontend: "Ontology" tab on `/skills` page with interactive SVG graph visualization, concept management, relation CRUD
+- Graph endpoint returns `{ nodes, edges }` for visualization; nodes include both skills and concepts
+
 **Auto-run**
 - Actions execute immediately after prompt submission (no manual "Run" button)
 - Resume button shown only when action is stopped with pending tasks

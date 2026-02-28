@@ -65,6 +65,15 @@ Skills use a stable `pattern_key` for deduplication — the same type of workflo
 
 Manage skills at `/skills` — filter by agent type and category, toggle active/inactive, edit priority and status, or create manual skills.
 
+### Skill Ontology (Knowledge Graph)
+
+Skills are linked to domain concepts (libraries, APIs, data formats, techniques, anti-patterns) via typed directed edges. When a skill is created, an LLM auto-extracts concepts and creates relations (`uses_tool`, `produces`, `avoids`). The `/skills` page has an **Ontology** tab with:
+
+- Interactive SVG graph visualization (hover to highlight connections)
+- Concept management (create, delete, filter by type)
+- Relation CRUD with validation (no duplicates, no self-loops)
+- Graph API: `GET /skills/ontology/graph` returns `{ nodes, edges }` for visualization
+
 ## Error Recovery
 
 When a task fails, a fast LLM triage call classifies the failure:

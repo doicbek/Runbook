@@ -31,17 +31,15 @@ export default function ActionWorkspacePage({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <div className="max-w-6xl mx-auto px-4 py-8">
-          <div className="h-8 w-48 bg-muted animate-pulse rounded mb-4" />
-          <div className="space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <div
-                key={i}
-                className="h-28 rounded-xl border border-l-[3px] border-l-border bg-muted/30 animate-pulse"
-              />
-            ))}
-          </div>
+      <div className="px-6 py-8">
+        <div className="h-8 w-48 bg-muted animate-pulse rounded mb-4" />
+        <div className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div
+              key={i}
+              className="h-28 border border-l-[3px] border-l-border bg-muted/30 animate-pulse"
+            />
+          ))}
         </div>
       </div>
     );
@@ -49,7 +47,7 @@ export default function ActionWorkspacePage({
 
   if (error || !action) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <p className="text-destructive text-lg">Action not found</p>
           <Link
@@ -64,9 +62,9 @@ export default function ActionWorkspacePage({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div>
       <WorkspaceHeader action={action} />
-      <div className="max-w-6xl mx-auto px-4 py-6">
+      <div className="px-6 py-6">
         <TaskBoard tasks={action.tasks} actionId={action.id} />
       </div>
     </div>

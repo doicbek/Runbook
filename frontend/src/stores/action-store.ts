@@ -11,6 +11,7 @@ export interface CurrentIterationInfo {
 export interface RetryStatus {
   attempt: number;
   max_attempts: number;
+  strategy?: string;  // "retry" | "recovery"
 }
 
 interface ActionStore {
@@ -25,11 +26,13 @@ interface ActionStore {
   taskIterations: Record<string, AgentIteration[]>;
   currentIteration: Record<string, CurrentIterationInfo>;
   retryStatus: Record<string, RetryStatus>;
+  failureReason: string | null;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
   setRecoveryAttempt: (attempt: number | null) => void;
   setReplanning: (v: boolean) => void;
+  setFailureReason: (reason: string | null) => void;
   clearTaskState: () => void;
   appendTaskLog: (taskId: string, log: { level: string; message: string }) => void;
   resetForAction: (actionId: string) => void;
@@ -58,6 +61,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   taskIterations: {},
   currentIteration: {},
   retryStatus: {},
+  failureReason: null,
 
   setTaskOverride: (taskId, override) =>
     set((state) => ({
@@ -76,8 +80,11 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   setReplanning: (v) =>
     set({ isReplanning: v }),
 
+  setFailureReason: (reason) =>
+    set({ failureReason: reason }),
+
   clearTaskState: () =>
-    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {} }),
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, failureReason: null }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -102,6 +109,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskIterations: {},
       currentIteration: {},
       retryStatus: {},
+      failureReason: null,
     }),
 
   resetLogs: (taskId) =>

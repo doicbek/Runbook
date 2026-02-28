@@ -187,6 +187,48 @@ export interface AgentSkill {
   updated_at: string;
 }
 
+export interface SkillConcept {
+  id: string;
+  name: string;
+  concept_type: "tool" | "library" | "api" | "data_format" | "anti_pattern" | "technique";
+  description: string | null;
+  created_at: string;
+}
+
+export interface SkillRelation {
+  id: string;
+  from_id: string;
+  relation_type: "depends_on" | "supersedes" | "related_to" | "fixes" | "uses_tool" | "produces" | "avoids";
+  to_id: string;
+  properties: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface OntologyNode {
+  id: string;
+  type: "skill" | "concept";
+  label: string;
+  agent_type?: string;
+  category?: string;
+  priority?: string;
+  status?: string;
+  recurrence_count?: number;
+  concept_type?: string;
+}
+
+export interface OntologyEdge {
+  id: string;
+  from_id: string;
+  relation_type: string;
+  to_id: string;
+  properties: Record<string, unknown> | null;
+}
+
+export interface OntologyGraph {
+  nodes: OntologyNode[];
+  edges: OntologyEdge[];
+}
+
 export interface AgentIterationToolCall {
   tool: string;
   input: Record<string, unknown>;

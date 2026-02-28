@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -61,7 +61,7 @@ export function useActionEvents(actionId: string, enabled = true) {
           case "task.failed":
             setTaskOverride(data.task_id as string, {
               status: "failed",
-              output_summary: data.error as string,
+              output_summary: (data.output_summary as string) || (data.error as string),
             });
             break;
           case "task.recovering":
@@ -89,6 +89,9 @@ export function useActionEvents(actionId: string, enabled = true) {
             setActionStatus("failed");
             setRecoveryAttempt(null);
             setReplanning(false);
+            if (data.reason) {
+              setFailureReason(data.reason as string);
+            }
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
             break;

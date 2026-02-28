@@ -119,6 +119,20 @@ BUILTIN_AGENTS = [
         "icon": "💻",
     },
     {
+        "agent_type": "mcp",
+        "name": "MCP",
+        "description": (
+            "Agent powered by MCP (Model Context Protocol) tool servers. Derives all "
+            "tools from configured MCP servers at runtime. Use when the task requires "
+            "tools provided by external MCP servers (e.g. filesystem access, databases, "
+            "APIs). Configure servers via the agent definition's mcp_config field."
+        ),
+        "tools": [],
+        "status": "active",
+        "is_builtin": True,
+        "icon": "🔌",
+    },
+    {
         "agent_type": "sub_action",
         "name": "Sub-Action",
         "description": (

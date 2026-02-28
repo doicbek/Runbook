@@ -149,7 +149,7 @@ export function TaskCard({
   return (
     <>
       <div
-        className="task-card group rounded-lg border bg-card text-card-foreground shadow-sm"
+        className="task-card group border-b border-border bg-card text-card-foreground"
         data-status={status}
       >
         {/* Header: index + agent type + status */}
@@ -295,13 +295,9 @@ export function TaskCard({
           />
         )}
 
-        {/* Error output */}
+        {/* Error output — structured failure panel */}
         {outputSummary && status === "failed" && (
-          <div className="mx-4 mb-3 bg-red-50 dark:bg-red-950/20 rounded-md p-2.5 border border-red-200 dark:border-red-800/30">
-            <p className="text-[11px] text-red-700 dark:text-red-300 font-mono leading-relaxed">
-              {outputSummary}
-            </p>
-          </div>
+          <FailurePanel outputSummary={outputSummary} />
         )}
 
         {/* Actions row */}
@@ -381,6 +377,116 @@ export function TaskCard({
         />
       )}
     </>
+  );
+}
+
+function FailurePanel({ outputSummary }: { outputSummary: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Parse structured output_summary: lines starting with "**Error:**", "- Attempt N (strategy):"
+  const errorMatch = outputSummary.match(/\*\*Error:\*\*\s*([\s\S]*?)(?=\n\n\*\*Recovery|$)/);
+  const mainError = errorMatch ? errorMatch[1].trim() : outputSummary;
+  const attemptLines = [...outputSummary.matchAll(/- Attempt (\d+) \((\w+)\): (.+)/g)];
+
+  if (attemptLines.length === 0) {
+    // Simple error — no recovery history (e.g. "Dependency failed")
+    return (
+      <div className="mx-4 mb-3 bg-red-50 dark:bg-red-950/20 rounded-md p-2.5 border border-red-200 dark:border-red-800/30">
+        <p className="text-[11px] text-red-700 dark:text-red-300 font-mono leading-relaxed whitespace-pre-wrap">
+          {outputSummary}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-4 mb-3 bg-red-50 dark:bg-red-950/20 rounded-md border border-red-200 dark:border-red-800/30 overflow-hidden">
+      {/* Main error */}
+      <div className="p-2.5">
+        <div className="flex items-start gap-1.5 mb-1">
+          <svg className="w-3 h-3 text-red-500 shrink-0 mt-0.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="6" cy="6" r="4.5" />
+            <path d="M6 4v2.5M6 8h.01" strokeLinecap="round" />
+          </svg>
+          <span className="text-[10px] font-medium uppercase tracking-wider text-red-600 dark:text-red-400">
+            Error
+          </span>
+        </div>
+        <p className="text-[11px] text-red-700 dark:text-red-300 font-mono leading-relaxed">
+          {expanded ? mainError : mainError.slice(0, 200)}
+          {!expanded && mainError.length > 200 && (
+            <button
+              onClick={() => setExpanded(true)}
+              className="text-red-500 hover:text-red-400 ml-1 underline"
+            >
+              show more
+            </button>
+          )}
+        </p>
+      </div>
+
+      {/* Recovery attempt timeline */}
+      <div className="border-t border-red-200 dark:border-red-800/30 px-2.5 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-red-600/70 dark:text-red-400/70">
+          Recovery attempts ({attemptLines.length})
+        </span>
+        <div className="mt-1.5 space-y-1.5">
+          {attemptLines.map((match, i) => (
+            <RecoveryAttemptRow
+              key={i}
+              attempt={parseInt(match[1])}
+              strategy={match[2]}
+              error={match[3]}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecoveryAttemptRow({
+  attempt,
+  strategy,
+  error,
+}: {
+  attempt: number;
+  strategy: string;
+  error: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const strategyLabel = strategy === "recovery" ? "sub-action" : strategy;
+
+  return (
+    <div className="rounded bg-red-100/50 dark:bg-red-950/30 border border-red-200/50 dark:border-red-800/20">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-2 py-1 text-left cursor-pointer"
+      >
+        <span className="text-[10px] font-mono text-red-500 tabular-nums shrink-0">
+          #{attempt}
+        </span>
+        <span className="text-[9px] font-medium uppercase tracking-wider text-red-600/60 dark:text-red-400/60 bg-red-200/50 dark:bg-red-900/30 px-1 py-0.5 rounded shrink-0">
+          {strategyLabel}
+        </span>
+        <span className="text-[10px] text-red-700/80 dark:text-red-300/80 font-mono truncate">
+          {error.slice(0, 80)}
+        </span>
+        <svg
+          className={`w-3 h-3 text-red-400/50 ml-auto shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"
+        >
+          <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="px-2 pb-1.5">
+          <p className="text-[10px] text-red-700 dark:text-red-300 font-mono leading-relaxed whitespace-pre-wrap break-all">
+            {error}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

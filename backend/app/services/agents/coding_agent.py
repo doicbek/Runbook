@@ -257,6 +257,25 @@ class CodingAgent(BaseAgent):
         if log_callback:
             await log_callback("info", f"Created worktree: {worktree_path} (branch: {branch_name})")
 
+        # Connect to MCP servers if configured
+        mcp_session = None
+        mcp_tools: list[dict] = []
+        if self.mcp_config and self.mcp_config.get("servers"):
+            try:
+                from app.services.mcp_client import MCPServerConfig, MCPSession
+                mcp_session = MCPSession()
+                configs = [MCPServerConfig.from_dict(s) for s in self.mcp_config["servers"]]
+                await mcp_session.connect(configs)
+                discovered = await mcp_session.list_tools()
+                mcp_tools = [t.openai_schema for t in discovered]
+                if log_callback:
+                    await log_callback("info", f"MCP: discovered {len(mcp_tools)} tools from {len(configs)} server(s)")
+            except Exception as e:
+                if log_callback:
+                    await log_callback("warn", f"MCP setup failed, continuing without MCP tools: {e}")
+                mcp_session = None
+                mcp_tools = []
+
         try:
             result = await self._run_loop(
                 task_id=task_id,
@@ -267,6 +286,8 @@ class CodingAgent(BaseAgent):
                 workspace=worktree_path,
                 branch_name=branch_name,
                 log_callback=log_callback,
+                mcp_tools=mcp_tools,
+                mcp_session=mcp_session,
             )
         except Exception:
             # On failure, try to clean up worktree
@@ -275,6 +296,9 @@ class CodingAgent(BaseAgent):
             except Exception:
                 logger.warning(f"Failed to clean up worktree {worktree_path}")
             raise
+        finally:
+            if mcp_session:
+                await mcp_session.close()
 
         # Store workspace info on the task
         await self._update_task_workspace(task_id, worktree_path, branch_name)
@@ -306,6 +330,8 @@ class CodingAgent(BaseAgent):
         workspace: str,
         branch_name: str,
         log_callback: Any,
+        mcp_tools: list[dict] | None = None,
+        mcp_session: Any = None,
     ) -> dict[str, Any]:
         """Core agentic loop: LLM → tool calls → repeat."""
 
@@ -383,7 +409,8 @@ class CodingAgent(BaseAgent):
             # Call LLM with tools
             try:
                 response_message = await self._call_llm_with_tools(
-                    model=model, config=config, messages=messages
+                    model=model, config=config, messages=messages,
+                    extra_tools=mcp_tools,
                 )
             except Exception as e:
                 # Save failed iteration and raise
@@ -510,7 +537,10 @@ class CodingAgent(BaseAgent):
 
                 # Execute regular tool
                 try:
-                    output = await self._execute_tool(tool_name, tool_args, workspace)
+                    output = await self._execute_tool(
+                        tool_name, tool_args, workspace,
+                        mcp_session=mcp_session, log_callback=log_callback,
+                    )
                     output_str = json.dumps(output) if not isinstance(output, str) else output
                     success = True
                 except Exception as e:
@@ -590,6 +620,7 @@ class CodingAgent(BaseAgent):
         model: str,
         config: Any,
         messages: list[dict],
+        extra_tools: list[dict] | None = None,
     ) -> dict:
         """Call the LLM with tool definitions and return the response message dict."""
         from app.config import settings
@@ -598,16 +629,19 @@ class CodingAgent(BaseAgent):
         if not api_key:
             raise ValueError(f"No API key for {model} (set {config.api_key_setting})")
 
+        all_tools = TOOL_DEFINITIONS + (extra_tools or [])
+
         if config.provider == "anthropic":
-            return await self._call_anthropic_with_tools(config, api_key, messages)
+            return await self._call_anthropic_with_tools(config, api_key, messages, all_tools)
         else:
-            return await self._call_openai_with_tools(config, api_key, messages)
+            return await self._call_openai_with_tools(config, api_key, messages, all_tools)
 
     async def _call_openai_with_tools(
         self,
         config: Any,
         api_key: str,
         messages: list[dict],
+        tools: list[dict] | None = None,
     ) -> dict:
         """Call OpenAI-compatible API with function calling."""
         from openai import AsyncOpenAI
@@ -621,7 +655,7 @@ class CodingAgent(BaseAgent):
         call_kwargs: dict = {
             "model": config.model_id,
             "messages": messages,
-            "tools": TOOL_DEFINITIONS,
+            "tools": tools or TOOL_DEFINITIONS,
         }
 
         # Handle newer models that use max_completion_tokens
@@ -657,6 +691,7 @@ class CodingAgent(BaseAgent):
         config: Any,
         api_key: str,
         messages: list[dict],
+        tools: list[dict] | None = None,
     ) -> dict:
         """Call Anthropic API with tool use."""
         from anthropic import AsyncAnthropic
@@ -665,7 +700,7 @@ class CodingAgent(BaseAgent):
 
         # Convert OpenAI-style tool defs to Anthropic format
         anthropic_tools = []
-        for tool_def in TOOL_DEFINITIONS:
+        for tool_def in (tools or TOOL_DEFINITIONS):
             func = tool_def["function"]
             anthropic_tools.append({
                 "name": func["name"],
@@ -749,6 +784,8 @@ class CodingAgent(BaseAgent):
         tool_name: str,
         args: dict,
         workspace: str,
+        mcp_session: Any = None,
+        log_callback: Any = None,
     ) -> Any:
         """Dispatch a tool call to the appropriate function."""
         if tool_name == "read_file":
@@ -763,6 +800,8 @@ class CodingAgent(BaseAgent):
             return await grep_search(args["pattern"], workspace, args.get("glob_filter"))
         elif tool_name == "bash":
             return await bash_run(args["command"], workspace, args.get("timeout", 120))
+        elif tool_name.startswith("mcp__") and mcp_session:
+            return await mcp_session.call_tool(tool_name, args, log_callback)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 

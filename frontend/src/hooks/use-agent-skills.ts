@@ -4,6 +4,13 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  listConcepts,
+  createConcept,
+  deleteConcept,
+  listRelations,
+  createRelation,
+  deleteRelation,
+  getOntologyGraph,
 } from "@/lib/api/agent-skills";
 
 export function useSkills(agentType?: string) {
@@ -50,6 +57,70 @@ export function useDeleteSkill() {
     mutationFn: deleteSkill,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
+      queryClient.invalidateQueries({ queryKey: ["ontology"] });
     },
+  });
+}
+
+// ── Ontology hooks ──────────────────────────────────────────────────────
+
+export function useConcepts(conceptType?: string) {
+  return useQuery({
+    queryKey: ["ontology", "concepts", conceptType ?? "all"],
+    queryFn: () => listConcepts(conceptType),
+  });
+}
+
+export function useCreateConcept() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createConcept,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ontology"] });
+    },
+  });
+}
+
+export function useDeleteConcept() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteConcept,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ontology"] });
+    },
+  });
+}
+
+export function useRelations(nodeId?: string) {
+  return useQuery({
+    queryKey: ["ontology", "relations", nodeId ?? "all"],
+    queryFn: () => listRelations(nodeId),
+  });
+}
+
+export function useCreateRelation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createRelation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ontology"] });
+    },
+  });
+}
+
+export function useDeleteRelation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteRelation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ontology"] });
+    },
+  });
+}
+
+export function useOntologyGraph(agentType?: string) {
+  return useQuery({
+    queryKey: ["ontology", "graph", agentType ?? "all"],
+    queryFn: () => getOntologyGraph(agentType),
   });
 }

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.agent_skill import AgentSkill
+from app.models.skill_relation import SkillConcept, SkillRelation
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,11 @@ async def generate_skill_from_success(
                 )
                 db.add(skill)
                 await db.commit()
+                await db.refresh(skill)
                 logger.info(f"[AgentSkills] New skill '{pattern_key}' for {agent_type}: {title[:60]}")
+                # Fire-and-forget concept extraction
+                import asyncio
+                asyncio.create_task(extract_concepts_from_skill(skill.id, title, description))
 
     except Exception:
         logger.exception(f"[AgentSkills] Failed to generate skill for {agent_type}")
@@ -492,3 +497,95 @@ async def _refine_description(existing: str, new: str) -> str:
     except Exception:
         logger.warning("[AgentSkills] Refinement LLM failed, keeping existing description")
         return existing
+
+
+async def extract_concepts_from_skill(skill_id: str, skill_title: str, skill_description: str) -> None:
+    """Auto-extract domain concepts (tools, libraries, APIs, techniques) from a skill.
+
+    Uses a fast LLM to identify concepts mentioned in the skill description,
+    creates SkillConcept nodes for each, and links them to the skill via
+    SkillRelation edges (uses_tool, produces, avoids).
+    """
+    from app.services.llm_client import chat_completion
+
+    try:
+        raw = await chat_completion(
+            "gpt-5-mini",
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract domain concepts from a skill description. For each concept, "
+                        "output one line with the format:\n"
+                        "CONCEPT_NAME | CONCEPT_TYPE | RELATION_TYPE\n\n"
+                        "CONCEPT_TYPE must be one of: tool, library, api, data_format, anti_pattern, technique\n"
+                        "RELATION_TYPE must be one of: uses_tool, produces, avoids\n\n"
+                        "Examples:\n"
+                        "scipy | library | uses_tool\n"
+                        "csv | data_format | produces\n"
+                        "rate_limiting | anti_pattern | avoids\n"
+                        "curve_fitting | technique | uses_tool\n\n"
+                        "Output 2-6 concepts, one per line. No other text."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Skill: {skill_title}\nDescription: {skill_description[:600]}",
+                },
+            ],
+            max_tokens=200,
+            temperature=0.2,
+        )
+
+        lines = [line.strip() for line in raw.strip().split("\n") if "|" in line]
+        if not lines:
+            return
+
+        valid_concept_types = {"tool", "library", "api", "data_format", "anti_pattern", "technique"}
+        valid_relation_types = {"uses_tool", "produces", "avoids"}
+
+        async with async_session() as db:
+            for line in lines[:6]:
+                parts = [p.strip().lower() for p in line.split("|")]
+                if len(parts) != 3:
+                    continue
+                concept_name, concept_type, relation_type = parts
+
+                if concept_type not in valid_concept_types or relation_type not in valid_relation_types:
+                    continue
+                if not concept_name or len(concept_name) > 255:
+                    continue
+
+                # Upsert concept
+                result = await db.execute(
+                    select(SkillConcept).where(SkillConcept.name == concept_name)
+                )
+                concept = result.scalar_one_or_none()
+                if not concept:
+                    concept = SkillConcept(
+                        name=concept_name,
+                        concept_type=concept_type,
+                    )
+                    db.add(concept)
+                    await db.flush()
+
+                # Create relation if not exists
+                result = await db.execute(
+                    select(SkillRelation).where(
+                        SkillRelation.from_id == skill_id,
+                        SkillRelation.relation_type == relation_type,
+                        SkillRelation.to_id == concept.id,
+                    )
+                )
+                if not result.scalar_one_or_none():
+                    db.add(SkillRelation(
+                        from_id=skill_id,
+                        relation_type=relation_type,
+                        to_id=concept.id,
+                    ))
+
+            await db.commit()
+            logger.info(f"[AgentSkills] Extracted concepts for skill '{skill_title[:40]}'")
+
+    except Exception:
+        logger.exception("[AgentSkills] Failed to extract concepts from skill")

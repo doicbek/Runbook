@@ -90,6 +90,12 @@ function RunningStatus({
 }
 
 function RetryBanner({ retry }: { retry: RetryStatus }) {
+  const strategyLabel = retry.strategy === "recovery"
+    ? "spawning recovery sub-action"
+    : retry.strategy === "retry"
+    ? "retrying with failure context"
+    : "trying alternative approach";
+
   return (
     <div className="flex items-center gap-2 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20">
       <svg className="w-3 h-3 text-amber-500 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -100,7 +106,7 @@ function RetryBanner({ retry }: { retry: RetryStatus }) {
         Retry {retry.attempt}/{retry.max_attempts}
       </span>
       <span className="text-[10px] text-muted-foreground">
-        &mdash; trying alternative approach
+        &mdash; {strategyLabel}
       </span>
     </div>
   );
@@ -137,7 +143,8 @@ export function IterationSummary({ taskId }: { taskId: string }) {
           </svg>
           <span className="text-[11px] text-red-400">
             Failed after {iterationCount} iteration{iterationCount !== 1 ? "s" : ""}
-            {lastIteration?.error && <> &mdash; {lastIteration.error.slice(0, 60)}</>}
+            {retry && <> &middot; {retry.max_attempts} recovery attempt{retry.max_attempts !== 1 ? "s" : ""}</>}
+            {lastIteration?.error && <> &mdash; {lastIteration.error.slice(0, 150)}</>}
           </span>
         </div>
       )}

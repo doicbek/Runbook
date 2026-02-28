@@ -3,6 +3,8 @@ from typing import Any
 
 
 class BaseAgent(ABC):
+    mcp_config: dict | None = None
+
     @abstractmethod
     async def execute(
         self,
