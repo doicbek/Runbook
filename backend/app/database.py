@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import action, agent_definition, agent_iteration, artifact, log, planner_config, task, task_output  # noqa: F401
+    from app.models import action, agent_definition, agent_iteration, agent_skill, artifact, log, planner_config, task, task_output  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -34,6 +34,14 @@ async def init_db():
             "ALTER TABLE tasks ADD COLUMN sub_action_id TEXT",
             "ALTER TABLE tasks ADD COLUMN workspace_path TEXT",
             "ALTER TABLE tasks ADD COLUMN workspace_branch TEXT",
+            # Self-improving agent skills columns
+            "ALTER TABLE agent_skills ADD COLUMN category TEXT DEFAULT 'learning'",
+            "ALTER TABLE agent_skills ADD COLUMN priority TEXT DEFAULT 'medium'",
+            "ALTER TABLE agent_skills ADD COLUMN status TEXT DEFAULT 'pending'",
+            "ALTER TABLE agent_skills ADD COLUMN pattern_key TEXT",
+            "ALTER TABLE agent_skills ADD COLUMN recurrence_count INTEGER DEFAULT 1",
+            "ALTER TABLE agent_skills ADD COLUMN first_seen DATETIME",
+            "ALTER TABLE agent_skills ADD COLUMN last_seen DATETIME",
         ]:
             try:
                 await conn.execute(text(stmt))

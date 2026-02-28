@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { AppShell } from "@/components/app-shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Runbook",
-    template: "%s · Runbook",
+    default: "runbook",
+    template: "%s · runbook",
   },
   description: "Agentic workflow orchestration platform",
   icons: {
@@ -35,7 +36,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   );

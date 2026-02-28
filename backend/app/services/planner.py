@@ -15,7 +15,7 @@ SYSTEM_PROMPT = """You are a task planner for an agentic workflow system. Given 
 
 Each task must have:
 - prompt: A specific, concrete instruction (not vague like "analyze data" but specific like "fetch weather data for San Francisco from the Open-Meteo API for all of 2025")
-- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "coding", "report", "general", "arxiv_search", "sub_action"
+- agent_type: One of "data_retrieval", "spreadsheet", "code_execution", "coding", "report", "general", "arxiv_search", "sub_action", "mcp"
 - dependencies: Array of 0-based indices of tasks this task depends on (must only reference earlier tasks)
 - model: (optional) Override the LLM model for this task. Use "provider/model_id" format. Leave null to use the default for the agent type.
 
@@ -27,6 +27,7 @@ Agent type guidelines:
 - "spreadsheet": Create or manipulate structured tabular data.
 - "report": Generate a formatted markdown report or document synthesizing inputs from other tasks.
 - "general": Catch-all for tasks that don't fit other categories.
+- "mcp": Agent powered by MCP tool servers. Use when the task requires tools from configured MCP servers (e.g. filesystem operations, database queries, external API calls via MCP).
 - "sub_action": Spawn a child action with its own multi-step planner-generated DAG. Use ONLY when a sub-problem is itself so complex that it requires multiple coordinated steps (e.g., a full research-then-analysis sub-workflow, or a multi-stage data pipeline with its own report). The task prompt must clearly describe the goal and expected output. Do NOT use sub_action for simple single-step tasks — prefer a direct agent type instead. Max nesting depth: 3 levels.
 
 Available LLM models and their strengths:
@@ -94,6 +95,16 @@ async def _get_custom_agent_context(db: AsyncSession) -> str:
         return ""
 
 
+async def _get_skills_context(db: AsyncSession) -> str:
+    """Return a block of skill summaries to inject into the planner system prompt."""
+    try:
+        from app.services.agents.agent_skills import get_skills_summary_for_planner
+        return await get_skills_summary_for_planner(db)
+    except Exception:
+        logger.exception("Failed to fetch skills for planner context")
+        return ""
+
+
 async def _load_planner_config(db: AsyncSession) -> tuple[str, str, int]:
     """Returns (system_prompt, model, max_retries) from DB config, falling back to defaults."""
     try:
@@ -118,7 +129,8 @@ async def plan_tasks(root_prompt: str, action_id: str, db: AsyncSession) -> list
 
     system_prompt_base, model, max_retries = await _load_planner_config(db)
     custom_agent_context = await _get_custom_agent_context(db)
-    system_prompt = system_prompt_base + custom_agent_context
+    skills_context = await _get_skills_context(db)
+    system_prompt = system_prompt_base + custom_agent_context + skills_context
 
     for attempt in range(max(max_retries, 1)):
         try:

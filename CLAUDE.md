@@ -1,6 +1,6 @@
 # claude.md
 
-**Project name: Runbook**
+**Project name: runbook**
 
 ## Project Overview
 
@@ -549,7 +549,7 @@ Agents propose. The system executes. The user can intervene at any moment.
 - AI-modify panel: describe a change in plain English → LLM rewrites code → user reviews
 - Endpoints: CRUD + `/scaffold` + `/:id/modify`
 
-**8 Real built-in agents** (all `is_builtin=True`, seeded at startup)
+**9 Real built-in agents** (all `is_builtin=True`, seeded at startup)
 - `arxiv_search`: arXiv API + ChromaDB semantic search + LLM synthesis with citations
 - `code_execution`: LLM-generated Python → sandboxed subprocess → plots/files as artifacts; **auto-installs PyPI packages** (pre-scan imports, 70+ pip name mappings, stdlib guard, multi-round retry)
 - `coding`: LLM-driven agentic coding loop in an isolated git worktree; tools: read_file, write_file, edit_file, glob, grep, bash; up to 50 iterations; produces git diff + change summary artifacts
@@ -590,6 +590,23 @@ Agents propose. The system executes. The user can intervene at any moment.
 - On failure, a fast LLM generates/revises actionable lessons
 - Lessons injected into subsequent task prompts for the same agent type
 
+**Self-improving agent skills** (`/skills`)
+- `agent_skills` DB table with 4 skill categories: `learning`, `error_pattern`, `correction`, `best_practice`
+- Priority levels: `low`, `medium`, `high`, `critical`; status: `pending`, `resolved`, `promoted`, `won't_fix`
+- Three auto-capture triggers in executor:
+  - **On success**: generates `learning` skill with stable `pattern_key` for dedup
+  - **On failure**: generates `error_pattern` skill with avoidance strategy
+  - **On recovery** (retry succeeds after failure): generates `correction` skill capturing the fix
+- Recurrence tracking: same `pattern_key` bumps `recurrence_count` + `last_seen` instead of creating duplicates
+- Skill refinement: repeated successes merge descriptions via LLM rather than discarding
+- Auto-promotion: skills with `recurrence_count >= 3` auto-promoted to `best_practice` with `high` priority
+- Priority auto-escalation: recurring error patterns escalate from `medium` → `high` → `critical`
+- Prompt injection: skills grouped by category (corrections first, then error patterns, best practices, learnings)
+- Planner integration: skill summaries injected into planner system prompt with `[AVOID]`/`[PROVEN]` labels
+- CRUD API: `GET/POST /skills`, `GET/PATCH/DELETE /skills/:id`, `GET /skills/stats`
+- Frontend: `/skills` page with category/agent-type filters, priority indicators, recurrence badges, inline edit with priority/status, stats bar
+- Agent detail page (`/agents/:id`) shows skills section with category badges and toggle
+
 **Auto-run**
 - Actions execute immediately after prompt submission (no manual "Run" button)
 - Resume button shown only when action is stopped with pending tasks
@@ -605,6 +622,15 @@ Agents propose. The system executes. The user can intervene at any moment.
 - Test sandbox: preview planned tasks for any prompt without creating an action
 - Custom agent context auto-injected into planner system prompt
 
+**MCP (Model Context Protocol) integration**
+- `MCPSession` in `backend/app/services/mcp_client.py` — connects to stdio MCP servers, discovers tools, dispatches calls
+- Tool name prefixing: `mcp__{server_name}__{tool_name}` avoids collisions with hardcoded tools
+- `mcp` builtin agent type (`MCPAgent`) — derives all tools from MCP servers, agentic loop with `done`/`fail` terminal tools
+- Any agent with `mcp_config` on its `AgentDefinition` gets MCP tools injected alongside hardcoded tools (e.g. CodingAgent)
+- `mcp_config` schema: `{"servers": [{"name": "...", "transport": "stdio", "command": "...", "args": [...], "env": {}, "timeout_seconds": 30}]}`
+- Test endpoint: `POST /agent-definitions/:id/test-mcp` — verifies connection and lists discovered tools
+- Executor loads `mcp_config` from DB and attaches to agent before execution
+
 **Multi-model LLM registry**
 - OpenAI: `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o3-mini`, `o4-mini`, `gpt-4o`, `gpt-4o-mini`
 - Anthropic: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-sonnet-4-5`
@@ -616,4 +642,4 @@ Agents propose. The system executes. The user can intervene at any moment.
 ### Known Deviations from Spec
 - Parallel execution uses `asyncio.gather` in a single process rather than a distributed worker queue (Celery/Redis). Acceptable for current scale.
 - No authentication, billing, or multi-user support (by design for MVP).
-- MCP integration is not yet implemented — agents use direct library calls instead.
+- MCP integration implemented: `mcp` agent type derives all tools from MCP servers; any agent with `mcp_config` gets MCP tools injected alongside hardcoded tools (e.g. CodingAgent). Test endpoint: `POST /agent-definitions/:id/test-mcp`.

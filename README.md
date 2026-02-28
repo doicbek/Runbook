@@ -1,6 +1,6 @@
-# Runbook
+# runbook
 
-Runbook turns a natural-language prompt into a live, editable DAG of AI agent tasks. Describe what you need, watch agents work in parallel, and intervene at any point — edit a task, pause an agent, or restart from any node.
+runbook turns a natural-language prompt into a live, editable DAG of AI agent tasks. Describe what you need, watch agents work in parallel, and intervene at any point — edit a task, pause an agent, or restart from any node.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ Prompt  ──>  Planner (LLM)  ──>  Task DAG  ──>  Parallel Agent Execu
 2. An LLM planner decomposes it into concrete tasks with typed agents and dependency edges.
 3. The DAG executor runs independent tasks in parallel via `asyncio.gather`.
 4. Each task streams logs and produces artifacts (files, plots, spreadsheets).
-5. Edit any task mid-flight — Runbook invalidates downstream nodes and re-runs from that point.
+5. Edit any task mid-flight — runbook invalidates downstream nodes and re-runs from that point.
 
 ## Agents
 
@@ -49,6 +49,21 @@ Prompt  ──>  Planner (LLM)  ──>  Task DAG  ──>  Parallel Agent Execu
 | `sub_action` | Spawns a child Action with its own DAG. Artifacts propagate back to the parent. Max depth 3. |
 
 Custom agents can be created in the Agent Studio (`/agents/new`) — describe what you want, select tools, and an LLM scaffolds the Python code.
+
+## Self-Improving Skills
+
+Agents learn continuously from both successes and failures via a structured skills system:
+
+| Category | Trigger | What it captures |
+|---|---|---|
+| `learning` | Task succeeds | Reusable workflow knowledge (libraries, APIs, techniques) |
+| `error_pattern` | Task fails | Recurring failure patterns with avoidance strategies |
+| `correction` | Retry succeeds after failure | What fixed the problem — "When X happens, do Y instead" |
+| `best_practice` | Auto-promoted | Learnings seen 3+ times, always injected into prompts |
+
+Skills use a stable `pattern_key` for deduplication — the same type of workflow or error produces the same key, so repeated encounters refine the existing skill instead of creating duplicates. Priority auto-escalates for recurring errors. Promoted skills are highlighted in both the planner system prompt and the agent's task prompt.
+
+Manage skills at `/skills` — filter by agent type and category, toggle active/inactive, edit priority and status, or create manual skills.
 
 ## Error Recovery
 
@@ -108,11 +123,12 @@ backend/
         general_agent.py           # Chain-of-thought
         sub_action_agent.py        # Child workflow
         agent_memory.py            # Persistent failure lessons
+        agent_skills.py            # Self-improving skills (learning/error/correction/promotion)
         registry.py                # Agent factory
 
 frontend/
   src/
-    app/                           # Next.js pages (actions, agents, planner)
+    app/                           # Next.js pages (actions, agents, skills, planner)
     components/workspace/          # TaskBoard, TaskCard, TaskCardEditor
     hooks/                         # TanStack Query + SSE event handler
     stores/                        # Zustand (real-time state overlay)
@@ -126,4 +142,5 @@ frontend/
 | `/` | Action list |
 | `/actions/:id` | Workspace — live DAG, logs, artifacts |
 | `/agents` | Agent Studio |
+| `/skills` | Self-improving skills manager |
 | `/planner` | Planner config + test sandbox |

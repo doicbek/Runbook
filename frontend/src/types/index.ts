@@ -166,6 +166,27 @@ export interface ModifyResponse {
   code: string;
 }
 
+export interface AgentSkill {
+  id: string;
+  agent_type: string;
+  title: string;
+  description: string;
+  source: "manual" | "auto" | "error" | "correction";
+  source_task_id: string | null;
+  source_action_id: string | null;
+  is_active: boolean;
+  usage_count: number;
+  category: "learning" | "error_pattern" | "correction" | "best_practice";
+  priority: "low" | "medium" | "high" | "critical";
+  status: "pending" | "resolved" | "promoted" | "won't_fix";
+  pattern_key: string | null;
+  recurrence_count: number;
+  first_seen: string;
+  last_seen: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentIterationToolCall {
   tool: string;
   input: Record<string, unknown>;

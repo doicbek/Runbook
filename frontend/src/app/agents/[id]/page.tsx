@@ -15,6 +15,7 @@ import {
   useDeleteAgentDefinition,
   useModifyAgent,
 } from "@/hooks/use-agent-definitions";
+import { useSkills, useUpdateSkill } from "@/hooks/use-agent-skills";
 import { useAvailableModels } from "@/hooks/use-models";
 
 const REAL_BUILTINS = new Set([
@@ -197,6 +198,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
           </CardContent>
         </Card>
 
+        {/* Skills */}
+        <AgentSkillsSection agentType={agent.agent_type} />
+
         {/* AI Modify + Code */}
         <Card>
           <CardHeader className="pb-2">
@@ -355,5 +359,84 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
       </div>
     </div>
+  );
+}
+
+const _catColors: Record<string, string> = {
+  learning: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
+  error_pattern: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  correction: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  best_practice: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+};
+
+function AgentSkillsSection({ agentType }: { agentType: string }) {
+  const { data: skills, isLoading } = useSkills(agentType);
+  const updateSkill = useUpdateSkill();
+
+  const handleToggle = async (id: string, currentActive: boolean) => {
+    await updateSkill.mutateAsync({ id, is_active: !currentActive });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">Skills</h2>
+          <Link href={`/skills?agent_type=${agentType}`}>
+            <Button variant="ghost" size="sm" className="text-xs h-6">
+              View all
+            </Button>
+          </Link>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {skills?.length === 0 && !isLoading && (
+          <p className="text-xs text-muted-foreground">
+            No skills yet. Skills are auto-generated from successes and failures, or create them in{" "}
+            <Link href="/skills" className="underline hover:text-foreground">
+              Skills
+            </Link>.
+          </p>
+        )}
+        {skills && skills.length > 0 && (
+          <div className="space-y-1.5">
+            {skills.map((skill) => (
+              <div
+                key={skill.id}
+                className={`flex items-center gap-2 text-xs ${
+                  skill.is_active ? "" : "opacity-50"
+                }`}
+              >
+                <button
+                  onClick={() => handleToggle(skill.id, skill.is_active)}
+                  className={`w-6 h-3 rounded-full relative transition-colors shrink-0 ${
+                    skill.is_active ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${
+                      skill.is_active ? "left-3.5" : "left-0.5"
+                    }`}
+                  />
+                </button>
+                {skill.status === "promoted" && (
+                  <span className="text-yellow-600 dark:text-yellow-400 shrink-0" title="Promoted">*</span>
+                )}
+                <span className="truncate flex-1">{skill.title}</span>
+                {skill.recurrence_count > 1 && (
+                  <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                    {skill.recurrence_count}x
+                  </span>
+                )}
+                <span className={`text-[10px] px-1 py-0.5 rounded ${_catColors[skill.category] ?? ""}`}>
+                  {skill.category.replace("_", " ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

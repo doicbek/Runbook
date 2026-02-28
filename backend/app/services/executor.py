@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import Action, Artifact, Log, Task, TaskOutput
+from app.models.agent_definition import AgentDefinition
 from app.models.agent_iteration import AgentIteration
 from app.services.agents.exceptions import InputUnavailableError
 from app.services.agents.registry import get_agent_async
@@ -287,6 +288,7 @@ async def _run_dag_pass(action_id: str):
                         await event_bus.publish(action_id, "task.failed", {
                             "task_id": t.id,
                             "error": "Dependency failed",
+                            "output_summary": "Dependency failed",
                         })
                     elif deps_met:
                         ready.append(t)
@@ -542,6 +544,61 @@ async def _transform_to_acquisition(
     return True
 
 
+async def _compress_for_handoff(raw_output: str) -> str:
+    """Compress verbose task output into a dense summary for downstream agents.
+
+    Only compresses outputs longer than 800 chars. Uses gpt-4o-mini for fast,
+    cheap compression that preserves all critical data (numbers, paths, artifacts,
+    column names, tabular structure). Falls back to truncation on LLM failure.
+    """
+    _COMPRESS_THRESHOLD = 800
+    _INPUT_CAP = 4000
+
+    if len(raw_output) <= _COMPRESS_THRESHOLD:
+        return raw_output
+
+    from app.services.llm_client import chat_completion
+
+    system = (
+        "You are a context compression assistant. Compress the following task output "
+        "into a dense, information-complete summary.\n\n"
+        "PRESERVE exactly:\n"
+        "- All numbers, statistics, and data values\n"
+        "- File paths and artifact URLs (copy verbatim)\n"
+        "- Column names and tabular structure (use compact tables)\n"
+        "- Key findings, conclusions, and error messages\n"
+        "- Variable names, function names, and code identifiers\n\n"
+        "REMOVE:\n"
+        "- Verbose prose, filler phrases, and repeated information\n"
+        "- Step-by-step narration of what the agent did\n"
+        "- Redundant explanations\n\n"
+        "Output a compact summary (300-600 tokens). Do NOT add commentary — "
+        "output only the compressed content."
+    )
+
+    try:
+        compressed = await chat_completion(
+            "gpt-4o-mini",
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": raw_output[:_INPUT_CAP]},
+            ],
+            max_tokens=800,
+            temperature=0.0,
+        )
+        compressed = compressed.strip()
+        if compressed:
+            logger.debug(
+                f"[Handoff] Compressed output from {len(raw_output)} to {len(compressed)} chars"
+            )
+            return compressed
+    except Exception as e:
+        logger.warning(f"[Handoff] Compression LLM failed ({e}), falling back to truncation")
+
+    # Fallback: truncate raw output
+    return raw_output[:_INPUT_CAP]
+
+
 async def _gather_dep_outputs(dependency_ids: list[str]) -> dict[str, str]:
     """Collect dependency outputs (text + artifact URLs) for a task."""
     dep_outputs: dict[str, str] = {}
@@ -565,6 +622,7 @@ async def _gather_dep_outputs(dependency_ids: list[str]) -> dict[str, str]:
                             text += f"![{art.type}]({url})\n"
                         else:
                             text += f"- [{art.type}: {art.mime_type}]({url})\n"
+                text = await _compress_for_handoff(text)
                 dep_outputs[dep_id] = text
     return dep_outputs
 
@@ -775,6 +833,18 @@ async def _run_task(
         )
         logger.info(f"[AgentMemory] Injecting memory for {agent_type} ({len(memory)} chars)")
 
+    # Inject proven skills for this agent type (self-improving knowledge base)
+    from app.services.agents.agent_skills import load_skills_for_agent, format_skills_for_prompt
+    try:
+        async with async_session() as db:
+            skills = await load_skills_for_agent(agent_type, db)
+        if skills:
+            skills_block = format_skills_for_prompt(skills)
+            effective_prompt = f"{skills_block}\n\n{effective_prompt}"
+            logger.info(f"[AgentSkills] Injecting {len(skills)} skills for {agent_type}")
+    except Exception:
+        logger.exception(f"[AgentSkills] Failed to load skills for {agent_type}")
+
     # Gather dependency outputs once (shared across retries)
     dep_outputs = await _gather_dep_outputs(dependency_ids)
 
@@ -783,6 +853,16 @@ async def _run_task(
     try:
         async with async_session() as db:
             agent = await get_agent_async(agent_type, db)
+            # Attach MCP config from agent definition if present
+            result = await db.execute(
+                select(AgentDefinition).where(
+                    AgentDefinition.agent_type == agent_type,
+                    AgentDefinition.status == "active",
+                )
+            )
+            defn = result.scalar_one_or_none()
+            if defn and defn.mcp_config:
+                agent.mcp_config = defn.mcp_config
         result = await agent.execute(task_id, effective_prompt, dep_outputs, log_callback, model=model)
 
         # Success — save output and return
@@ -801,6 +881,19 @@ async def _run_task(
         try:
             from app.services.agents.agent_memory import generate_and_save_lesson
             await generate_and_save_lesson(agent_type, prompt, first_error)
+        except Exception:
+            pass
+
+        # Generate error pattern skill for self-improvement
+        try:
+            from app.services.agents.agent_skills import generate_skill_from_failure
+            asyncio.create_task(generate_skill_from_failure(
+                agent_type=agent_type,
+                task_prompt=prompt,
+                error=first_error,
+                task_id=task_id,
+                action_id=action_id,
+            ))
         except Exception:
             pass
 
@@ -876,6 +969,16 @@ async def _run_task(
             try:
                 async with async_session() as db:
                     agent = await get_agent_async(agent_type, db)
+                    # Attach MCP config from agent definition if present
+                    defn_result = await db.execute(
+                        select(AgentDefinition).where(
+                            AgentDefinition.agent_type == agent_type,
+                            AgentDefinition.status == "active",
+                        )
+                    )
+                    defn = defn_result.scalar_one_or_none()
+                    if defn and defn.mcp_config:
+                        agent.mcp_config = defn.mcp_config
                 result = await agent.execute(
                     task_id, retry_prompt, dep_outputs, log_callback, model=model
                 )
@@ -925,6 +1028,20 @@ async def _run_task(
         if result is not None:
             await log_callback("info", f"Attempt {attempt_num} ({strategy}) succeeded!")
             await _save_task_success(action_id, task_id, result)
+
+            # Generate correction skill — captures what fixed the failure
+            try:
+                from app.services.agents.agent_skills import generate_correction_skill
+                asyncio.create_task(generate_correction_skill(
+                    agent_type=agent_type,
+                    task_prompt=prompt,
+                    error=first_error,
+                    successful_output=result.get("output_summary") or result.get("summary", ""),
+                    task_id=task_id,
+                    action_id=action_id,
+                ))
+            except Exception:
+                pass
             return
 
         # Failed — record and continue
@@ -953,21 +1070,28 @@ async def _run_task(
         "original_error": first_error[:300],
     })
 
+    structured_summary = (
+        f"**Error:** {first_error[:500]}\n\n"
+        f"**Recovery attempts:** {_MAX_RECOVERY_ATTEMPTS_PER_TASK}\n"
+        + "\n".join(
+            f"- Attempt {p['attempt']} ({p['strategy']}): {p['error'][:200]}"
+            for p in prior_attempts
+        )
+    )
+
     async with async_session() as db:
         task_result = await db.execute(select(Task).where(Task.id == task_id))
         task = task_result.scalar_one()
         task.status = "failed"
-        task.output_summary = (
-            f"Original error: {first_error[:300]}\n\n"
-            f"Recovery exhausted after {_MAX_RECOVERY_ATTEMPTS_PER_TASK} attempts "
-            f"(strategies tried: {', '.join(p['strategy'] for p in prior_attempts)})."
-        )
+        task.output_summary = structured_summary
         await db.commit()
 
     await event_bus.publish(action_id, "task.failed", {
         "task_id": task_id,
-        "error": first_error[:300],
+        "error": first_error[:500],
+        "output_summary": structured_summary,
         "recovery_attempts": _MAX_RECOVERY_ATTEMPTS_PER_TASK,
+        "recovery_history": prior_attempts,
     })
 
 
@@ -995,3 +1119,19 @@ async def _save_task_success(action_id: str, task_id: str, result: dict):
         "output_summary": result.get("output_summary") or result.get("summary", "Completed"),
         "artifact_ids": result.get("artifact_ids", []),
     })
+
+    # Fire-and-forget: auto-generate a skill from this success
+    try:
+        from app.services.agents.agent_skills import generate_skill_from_success
+        async with async_session() as db:
+            task_result2 = await db.execute(select(Task).where(Task.id == task_id))
+            task_obj = task_result2.scalar_one()
+            asyncio.create_task(generate_skill_from_success(
+                agent_type=task_obj.agent_type,
+                task_prompt=task_obj.prompt,
+                output_summary=result.get("output_summary") or result.get("summary", "Completed"),
+                task_id=task_id,
+                action_id=action_id,
+            ))
+    except Exception:
+        logger.debug(f"[AgentSkills] Failed to schedule skill generation for task {task_id}")
