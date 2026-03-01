@@ -571,3 +571,53 @@
   - The executor recovery loop is inherently complex (~300 lines) and resists further extraction without creating tight coupling
   - Agent creation + MCP config + stream callback setup was duplicated in primary and retry paths — extracting `_create_agent` helper eliminated that
 ---
+
+## 2026-03-01 - US-019
+- Added per-action monotonic counter (`_event_counters`) and ring buffer (`_event_history` using `deque(maxlen=100)`) to EventBus
+- Each published event now gets an `id` field from the counter
+- Added `replay_from(action_id, last_event_id)` method returning events with id > last_event_id
+- Added `clear_history(action_id)` method to clean up counter and buffer
+- Ring buffer cleared on action completion (`publish_action_completed`), failure (`publish_action_failed`), and deletion (`delete_action`)
+- Files changed: `backend/app/services/event_bus.py`, `backend/app/services/event_publisher.py`, `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - EventBus is a simple in-process singleton — modifications are straightforward
+  - `event_publisher.py` wraps `event_bus.publish()` calls — good place to add post-publish side effects like `clear_history`
+  - `delete_action` in `actions.py` loops over all action IDs (including sub-actions) — add cleanup per aid in that loop
+---
+
+## 2026-03-01 - US-020
+- Added bounded queues to EventBus: `asyncio.Queue(maxsize=500)` instead of unbounded
+- On QueueFull: evicts oldest event via `get_nowait()` then re-inserts new event (no dropped events)
+- Added `queue_depth(action_id)` method returning per-subscriber queue sizes
+- Added high watermark warning at 80% capacity (400 events)
+- Added module-level constants `QUEUE_MAX_SIZE=500` and `QUEUE_HIGH_WATERMARK=400`
+- Files changed: `backend/app/services/event_bus.py`
+- **Learnings for future iterations:**
+  - The old QueueFull handler just logged and dropped events — the new pattern evicts oldest to make room
+  - `asyncio.Queue.qsize()` gives current depth; useful for monitoring
+---
+
+## 2026-03-01 - US-021
+- Implemented SSE reconnect with exponential backoff (1s→2s→4s→8s→16s→30s cap)
+- `sse.ts`: Rewrote `createSSEConnection` to return `SSEConnection` object with `close()` method; manages internal EventSource lifecycle with auto-reconnect on error, backoff reset on open
+- `sse.ts`: Registered all missing event types (task.recovering, task.recovered, action.replanning, action.retrying, sub_action.progress, task.acquisition, iteration.*, task.recovery.*, task.paused, task.resumed, task.user_guidance)
+- `use-action-events.ts`: Removed 3-errors-and-give-up logic (`errorCountRef`); reconnect is now handled by sse.ts internally
+- `actions.py`: Backend reads `Last-Event-ID` header on reconnect, replays missed events from ring buffer before entering live loop; includes event `id` in SSE responses
+- Files changed: `frontend/src/lib/sse.ts`, `frontend/src/hooks/use-action-events.ts`, `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - `sse-starlette` EventSourceResponse supports `id` field in yielded dicts — just add `"id": str(event_id)` to include SSE event IDs
+  - EventSource browser API auto-sends `Last-Event-ID` header on reconnect, but only if events have `id` field set
+  - The `SSEConnection` wrapper pattern (close over EventSource + reconnect timer) is cleaner than exposing raw EventSource
+---
+
+## 2026-03-01 - US-022
+- Added `sseConnected` boolean to Zustand action store with `setSSEConnected` setter
+- Wired `onError` callback in `use-action-events.ts` to set `sseConnected=false`, `onOpen` to set `sseConnected=true`
+- Added yellow "Reconnecting..." badge with pulsing wifi-off icon to workspace header when `sseConnected` is false
+- Badge auto-disappears when connection recovers (onOpen fires)
+- Files changed: `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`, `frontend/src/components/workspace/workspace-header.tsx`
+- **Learnings for future iterations:**
+  - SSE reconnection logic already exists in `sse.ts` with exponential backoff; just need to surface state to UI
+  - `resetForAction` in action store must include any new fields to avoid stale state on action switch
+  - The workspace header badge pattern: variant="secondary" + bg color classes for light/dark modes
+---
