@@ -87,19 +87,27 @@ export default function PlannerPage() {
     }
   }, [config, initialized]);
 
-  const modelsByProvider: Record<string, { name: string; display_name: string }[]> = {};
+  // Models grouped by provider from planner-config response (all providers)
+  const plannerModelsByProvider: Record<string, { name: string; display_name: string }[]> = {};
+  if (config?.available_models) {
+    for (const m of config.available_models) {
+      if (!plannerModelsByProvider[m.provider]) plannerModelsByProvider[m.provider] = [];
+      plannerModelsByProvider[m.provider].push(m);
+    }
+  }
+  // All models from /models endpoint for AI Modify dropdown
+  const allModelsByProvider: Record<string, { name: string; display_name: string }[]> = {};
   if (modelsData?.models) {
     for (const m of modelsData.models) {
-      if (!modelsByProvider[m.provider]) modelsByProvider[m.provider] = [];
-      modelsByProvider[m.provider].push(m);
+      if (!allModelsByProvider[m.provider]) allModelsByProvider[m.provider] = [];
+      allModelsByProvider[m.provider].push(m);
     }
   }
   const providerLabels: Record<string, string> = {
     openai: "OpenAI", anthropic: "Anthropic", deepseek: "DeepSeek", google: "Google",
   };
-
-  // Only OpenAI models support structured output (used by planner)
-  const openaiModels = modelsByProvider["openai"] ?? [];
+  // Provider display order: Anthropic first
+  const providerOrder = ["anthropic", "google", "openai", "deepseek"];
 
   const customAgents = agents?.filter((a) => !a.is_builtin && a.status === "active") ?? [];
 
@@ -210,26 +218,32 @@ export default function PlannerPage() {
           <CardHeader className="pb-2">
             <h2 className="font-semibold text-sm">Planning Settings</h2>
             <p className="text-xs text-muted-foreground">
-              The planning model must support structured outputs (OpenAI models only).
+              Select the model used for decomposing prompts into tasks. Supports all providers with configured API keys.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-1 space-y-1">
                 <label className="text-xs font-medium">Planning Model</label>
-                {openaiModels.length > 0 ? (
+                {Object.keys(plannerModelsByProvider).length > 0 ? (
                   <select
                     value={planningModel}
                     onChange={(e) => setPlanningModel(e.target.value)}
                     className="w-full text-xs border rounded-md px-2 py-1.5 bg-background text-foreground"
                   >
-                    {openaiModels.map((m) => (
-                      <option key={m.name} value={m.name.split("/")[1] ?? m.name}>
-                        {m.display_name}
-                      </option>
-                    ))}
-                    {/* Fallback if not in available list */}
-                    {!openaiModels.find((m) => m.name.split("/")[1] === planningModel) && (
+                    {providerOrder
+                      .filter((p) => plannerModelsByProvider[p])
+                      .map((provider) => (
+                        <optgroup key={provider} label={providerLabels[provider] || provider}>
+                          {plannerModelsByProvider[provider].map((m) => (
+                            <option key={m.name} value={m.name}>
+                              {m.display_name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    {/* Fallback if current value not in available list */}
+                    {!config?.available_models?.find((m) => m.name === planningModel) && planningModel && (
                       <option value={planningModel}>{planningModel}</option>
                     )}
                   </select>
@@ -237,7 +251,7 @@ export default function PlannerPage() {
                   <Input
                     value={planningModel}
                     onChange={(e) => setPlanningModel(e.target.value)}
-                    placeholder="gpt-4o"
+                    placeholder="anthropic/claude-opus-4-6"
                     className="font-mono text-xs"
                   />
                 )}
@@ -328,13 +342,15 @@ export default function PlannerPage() {
                     className="text-xs border rounded px-2 py-1.5 bg-background text-foreground"
                   >
                     <option value="">Default model</option>
-                    {Object.entries(modelsByProvider).map(([provider, models]) => (
-                      <optgroup key={provider} label={providerLabels[provider] || provider}>
-                        {models.map((m) => (
-                          <option key={m.name} value={m.name}>{m.display_name}</option>
-                        ))}
-                      </optgroup>
-                    ))}
+                    {providerOrder
+                      .filter((p) => allModelsByProvider[p])
+                      .map((provider) => (
+                        <optgroup key={provider} label={providerLabels[provider] || provider}>
+                          {allModelsByProvider[provider].map((m) => (
+                            <option key={m.name} value={m.name}>{m.display_name}</option>
+                          ))}
+                        </optgroup>
+                      ))}
                   </select>
                 )}
                 <Button

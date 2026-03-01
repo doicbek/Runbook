@@ -1,7 +1,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +17,7 @@ from app.schemas.planner_config import (
     PlannerPreviewResponse,
     PlannerPreviewTask,
 )
-from app.services.llm_client import MODEL_REGISTRY, chat_completion, get_default_model_for_agent
+from app.services.llm_client import MODEL_REGISTRY, chat_completion, get_available_models, get_default_model_for_agent, planner_completion
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,17 @@ async def _get_config(db: AsyncSession) -> PlannerConfig:
 
 @router.get("", response_model=PlannerConfigResponse)
 async def get_planner_config(db: AsyncSession = Depends(get_db)):
-    return await _get_config(db)
+    cfg = await _get_config(db)
+    available = get_available_models()
+    return PlannerConfigResponse(
+        id=cfg.id,
+        system_prompt=cfg.system_prompt,
+        model=cfg.model,
+        max_tasks=cfg.max_tasks,
+        max_retries=cfg.max_retries,
+        updated_at=cfg.updated_at,
+        available_models=available,
+    )
 
 
 @router.get("/api-status", response_model=list[ApiKeyStatus])
@@ -79,7 +88,16 @@ async def update_planner_config(
         cfg.max_retries = body.max_retries
     await db.commit()
     await db.refresh(cfg)
-    return cfg
+    available = get_available_models()
+    return PlannerConfigResponse(
+        id=cfg.id,
+        system_prompt=cfg.system_prompt,
+        model=cfg.model,
+        max_tasks=cfg.max_tasks,
+        max_retries=cfg.max_retries,
+        updated_at=cfg.updated_at,
+        available_models=available,
+    )
 
 
 @router.post("/preview", response_model=PlannerPreviewResponse)
@@ -88,41 +106,40 @@ async def preview_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """Run the planner on a test prompt and return tasks without persisting anything."""
-    if not settings.OPENAI_API_KEY:
-        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
-
     cfg = await _get_config(db)
     system_prompt = body.system_prompt or cfg.system_prompt
 
     # Inject custom agents into the prompt
-    from app.services.planner import _get_custom_agent_context
+    from app.services.planner import _get_custom_agent_context, _PLANNER_TOOL_SCHEMA
     custom_context = await _get_custom_agent_context(db)
     full_prompt = system_prompt + custom_context
 
-    from app.schemas.planner import PlannerOutput
+    messages = [
+        {"role": "system", "content": full_prompt},
+        {"role": "user", "content": body.prompt},
+    ]
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    # Use the configured model as override if set, otherwise let planner_completion use its chain
+    model_override = cfg.model if cfg.model else None
+
     for attempt in range(cfg.max_retries):
         try:
-            completion = await client.beta.chat.completions.parse(
-                model=cfg.model,
-                messages=[
-                    {"role": "system", "content": full_prompt},
-                    {"role": "user", "content": body.prompt},
-                ],
-                response_format=PlannerOutput,
+            result = await planner_completion(
+                messages,
+                tool_name="plan_tasks",
+                tool_schema=_PLANNER_TOOL_SCHEMA,
+                model_override=model_override,
             )
-            parsed = completion.choices[0].message.parsed
-            if parsed and parsed.tasks:
+            if result and result.get("tasks"):
                 return PlannerPreviewResponse(
                     tasks=[
                         PlannerPreviewTask(
-                            prompt=t.prompt,
-                            agent_type=t.agent_type,
-                            dependencies=t.dependencies,
-                            model=t.model,
+                            prompt=t["prompt"],
+                            agent_type=t["agent_type"],
+                            dependencies=t.get("dependencies", []),
+                            model=t.get("model"),
                         )
-                        for t in parsed.tasks
+                        for t in result["tasks"]
                     ],
                     used_system_prompt=full_prompt,
                 )

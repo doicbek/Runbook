@@ -129,6 +129,12 @@ export interface ScaffoldResponse {
   setup_notes: string;
 }
 
+export interface PlannerConfigModel {
+  name: string;
+  display_name: string;
+  provider: string;
+}
+
 export interface PlannerConfig {
   id: string;
   system_prompt: string;
@@ -136,6 +142,7 @@ export interface PlannerConfig {
   max_tasks: number;
   max_retries: number;
   updated_at: string;
+  available_models: PlannerConfigModel[];
 }
 
 export interface ApiKeyStatus {

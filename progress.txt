@@ -8,7 +8,9 @@
 - Run `python -m py_compile` from `backend/` dir for quick typecheck; use `python -c "from app.models.X import Y"` to verify imports
 - Git operations must be run from repo root `/mnt/c/Users/dobec/actions/`
 - Backend Python runs from `/mnt/c/Users/dobec/actions/backend/`
-- For LLM tool calling, use provider SDKs directly (not `chat_completion()`); OpenAI and Anthropic have different tool call/result formats
+- For LLM structured output via tool calling, use `chat_completion_with_tool(model, messages, tool_name, tool_schema)` in `llm_client.py` — handles both Anthropic tool_use and OpenAI function calling
+- For planner-style calls with fallback chain, use `planner_completion(messages, tool_name, tool_schema, model_override=...)` — tries PLANNER_MODEL_CHAIN with API key checks
+- For agentic tool calling loops (CodingAgent etc.), use provider SDKs directly; OpenAI and Anthropic have different tool call/result formats
 - CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
 - Pause/resume uses in-memory `pause_manager` singleton; CodingAgent checks between iterations; task status 'paused' is valid
 - `diff2html` is available for rendering unified diffs; use `ColorSchemeType` enum from `diff2html/lib/types`, not string literals
@@ -303,4 +305,76 @@
   - `asyncio.create_task()` returns a task handle that must be cancelled on shutdown to avoid warnings
   - `sqlalchemy.delete().where(...in_(...))` works for bulk deletes with subquery filtering
   - Only clean up iterations for completed actions — running/failed actions may still need their history
+---
+
+## 2026-02-28 - US-001
+- Added `UTILITY_MODEL_CHAIN` constant: `['google/gemini-2.5-flash', 'deepseek/deepseek-chat', 'openai/gpt-5-mini']`
+- Added `utility_completion(messages, **kwargs) -> str` async function to `llm_client.py`
+- Iterates chain, skips models without API keys, catches runtime errors and tries next
+- Raises last exception if all fail, or ValueError if no keys configured
+- Files changed: `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - `utility_completion` is the go-to for cheap LLM calls — use it instead of hardcoding `chat_completion('gpt-5-mini', ...)`
+  - The chain tries Gemini Flash first (cheapest), then DeepSeek, then GPT-5 Mini
+  - Function delegates to `chat_completion()` internally, so all provider routing logic is reused
+---
+
+## 2026-02-28 - US-002
+- Migrated all hardcoded `gpt-5-mini` call sites to `utility_completion`
+- executor.py: `_triage_failure` and `_compress_for_handoff` now use `utility_completion` instead of `chat_completion("gpt-5-mini", ...)`
+- agent_skills.py: all 5 functions (generate_skill_from_success, generate_skill_from_failure, generate_correction_skill, _refine_description, extract_concepts_from_skill) migrated
+- agent_memory.py: `generate_and_save_lesson` migrated
+- actions.py: `_generate_title` replaced raw `AsyncOpenAI` instantiation with `utility_completion`
+- Files changed: `backend/app/services/executor.py`, `backend/app/services/agents/agent_skills.py`, `backend/app/services/agents/agent_memory.py`, `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - `utility_completion(messages, **kwargs)` takes messages list directly (no model param) — the model is selected automatically via fallback chain
+  - When migrating from `chat_completion("gpt-5-mini", messages, ...)` just remove the model arg and switch to `utility_completion(messages, ...)`
+  - When migrating from raw `AsyncOpenAI`, replace the entire client setup + response parsing — `utility_completion` returns a plain string
+  - Remaining `gpt-5-mini` references in MODEL_REGISTRY, DEFAULT_MODELS_BY_AGENT_TYPE, _MAX_COMPLETION_TOKENS_MODELS, and _new_models sets are legitimate config — not call sites
+---
+
+## 2026-02-28 - US-003
+- Updated `DEFAULT_MODELS_BY_AGENT_TYPE` to prefer Anthropic/Gemini: code_execution, spreadsheet, general, mcp → claude-sonnet-4-6; coding → claude-opus-4-6; data_retrieval → gemini-2.5-flash
+- Changed `FALLBACK_MODEL` from `openai/gpt-5` to `anthropic/claude-sonnet-4-6`
+- Updated `get_default_model_for_agent` fallback logic to iterate providers in priority order: Anthropic → Google → OpenAI → DeepSeek
+- Files changed: `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - The fallback logic in `get_default_model_for_agent` has 3 tiers: (1) preferred model for agent type, (2) FALLBACK_MODEL, (3) iterate all models by provider priority
+  - Provider priority order matters — when no preferred key is available, the system tries Anthropic first, then Google, then OpenAI
+---
+
+## 2026-02-28 - US-004
+- Migrated planner.py and recovery_planner.py from direct `AsyncOpenAI` usage to `planner_completion()` with tool_use for structured output
+- Added `chat_completion_with_tool()` to llm_client.py — handles both Anthropic tool_use (`tool_choice: {type: tool}`) and OpenAI function calling
+- Added `planner_completion()` with fallback chain: claude-opus-4-6 → claude-sonnet-4-6 → gemini-2.5-pro → gpt-5
+- Added `_anthropic_tool_call()` and `_openai_tool_call()` provider-specific implementations
+- Planner now uses tool schema (`_PLANNER_TOOL_SCHEMA`) instead of OpenAI's `response_format=PlannerOutput`
+- Recovery planner uses same pattern with `_RECOVERY_TOOL_SCHEMA`
+- Updated `planner_config_seed.py` default model from `settings.OPENAI_MODEL` to `anthropic/claude-opus-4-6`
+- planner.py no longer requires `OPENAI_API_KEY` — works with any configured provider
+- Files changed: `backend/app/services/llm_client.py`, `backend/app/services/planner.py`, `backend/app/services/recovery_planner.py`, `backend/app/services/planner_config_seed.py`
+- **Learnings for future iterations:**
+  - Anthropic tool_use: define tool with `input_schema`, force with `tool_choice: {type: "tool", name: "..."}`, parse `block.input` from `tool_use` content blocks
+  - OpenAI function calling: define tool with `parameters` schema, force with `tool_choice: {type: "function", function: {name: "..."}}`, parse `json.loads(tool_calls[0].function.arguments)`
+  - `chat_completion_with_tool` is for single forced tool calls; agentic multi-tool loops still use SDKs directly
+  - `planner_completion` supports `model_override` param — planner config DB can override the default chain order
+  - Tool schemas use standard JSON Schema; for nullable fields use `"type": ["string", "null"]`
+---
+
+## 2026-03-01 - US-005
+- Updated GET /planner-config to include `available_models` field with all models that have configured API keys
+- Added `AvailableModel` schema to `planner_config.py` schemas
+- Updated both GET and PATCH endpoints to return `PlannerConfigResponse` with `available_models` populated
+- Migrated preview endpoint from direct `AsyncOpenAI` usage to `planner_completion()` with tool_use (same pattern as main planner)
+- Removed `openai` import from planner_config router — no longer depends on OpenAI SDK directly
+- Frontend: model dropdown now shows all providers grouped by provider (Anthropic first, then Google, OpenAI, DeepSeek)
+- Frontend: model values now use full `provider/model` format (e.g. `anthropic/claude-opus-4-6`) matching backend
+- Added `PlannerConfigModel` TypeScript interface and `available_models` field to `PlannerConfig` type
+- Default model is `anthropic/claude-opus-4-6` (set by planner_config_seed.py)
+- Files changed: `backend/app/routers/planner_config.py`, `backend/app/schemas/planner_config.py`, `frontend/src/app/planner/page.tsx`, `frontend/src/types/index.ts`
+- **Learnings for future iterations:**
+  - `get_available_models()` from llm_client.py returns list of dicts with `name`, `display_name`, `provider` — already filters by configured API keys
+  - `planner_completion()` handles multi-provider fallback for planning calls — use it instead of direct AsyncOpenAI
+  - The preview endpoint was the last place using direct AsyncOpenAI — now fully migrated
+  - Frontend model dropdowns should use `providerOrder` array for consistent ordering across the app
 ---

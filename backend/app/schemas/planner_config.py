@@ -3,6 +3,12 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class AvailableModel(BaseModel):
+    name: str
+    display_name: str
+    provider: str
+
+
 class PlannerConfigResponse(BaseModel):
     id: str
     system_prompt: str
@@ -10,6 +16,7 @@ class PlannerConfigResponse(BaseModel):
     max_tasks: int
     max_retries: int
     updated_at: datetime
+    available_models: list[AvailableModel] = []
 
     model_config = {"from_attributes": True}
 
