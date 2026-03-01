@@ -1,17 +1,21 @@
 import asyncio
 import json
+import os
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from app.database import get_db
-from app.models import Action, Task
+from app.models import Action, Task, AgentIteration, TaskOutput, Log, Artifact
 from app.schemas.action import ActionCreate, ActionListResponse, ActionResponse, ActionUpdate
 from app.schemas.task import TaskResponse
 from app.services.event_bus import event_bus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
@@ -173,6 +177,74 @@ async def run_action(action_id: str, db: AsyncSession = Depends(get_db)):
     # Return current state
     await db.refresh(action)
     return action
+
+
+@router.delete("/{action_id}", status_code=204)
+async def delete_action(action_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete an action and all related data (tasks, outputs, artifacts, logs, iterations)."""
+    from app.services.executor import _running_executors
+
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    # Recursively collect all action IDs to delete (this action + sub-actions)
+    action_ids_to_delete: list[str] = []
+    queue = [action_id]
+    while queue:
+        current = queue.pop()
+        action_ids_to_delete.append(current)
+        child_result = await db.execute(
+            select(Action.id).where(Action.parent_action_id == current)
+        )
+        queue.extend(child_result.scalars().all())
+
+    # Cancel running executors for all actions being deleted
+    for aid in action_ids_to_delete:
+        existing = _running_executors.get(aid)
+        if existing and not existing.done():
+            existing.cancel()
+            try:
+                await existing
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    # Collect artifact storage paths for file cleanup
+    artifact_result = await db.execute(
+        select(Artifact.storage_path).where(Artifact.action_id.in_(action_ids_to_delete))
+    )
+    artifact_paths = [p for p in artifact_result.scalars().all() if p]
+
+    # Delete in dependency order (children before parents)
+    for aid in reversed(action_ids_to_delete):
+        task_ids_result = await db.execute(
+            select(Task.id).where(Task.action_id == aid)
+        )
+        task_ids = task_ids_result.scalars().all()
+
+        if task_ids:
+            # AgentIteration not in cascade — delete explicitly
+            await db.execute(
+                delete(AgentIteration).where(AgentIteration.action_id == aid)
+            )
+
+        # Delete the action — cascades handle Task, TaskOutput, Artifact (DB), Log
+        action_result = await db.execute(select(Action).where(Action.id == aid))
+        action_to_delete = action_result.scalar_one_or_none()
+        if action_to_delete:
+            await db.delete(action_to_delete)
+
+    await db.commit()
+
+    # Clean up artifact files on disk (after DB commit, swallow errors)
+    for path in artifact_paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    return Response(status_code=204)
 
 
 @router.get("/{action_id}/events")
