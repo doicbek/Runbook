@@ -47,8 +47,8 @@ function Spinner({ className = "" }: { className?: string }) {
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { data: allActions } = useActions();
-  const actions = allActions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
+  const { data: actionsData } = useActions();
+  const actions = actionsData?.actions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
   const createAction = useCreateAction();
   const deleteAction = useDeleteAction();
   const [dialogOpen, setDialogOpen] = useState(false);

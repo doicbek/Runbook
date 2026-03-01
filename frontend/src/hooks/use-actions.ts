@@ -9,10 +9,10 @@ import {
   updateAction,
 } from "@/lib/api/actions";
 
-export function useActions() {
+export function useActions(params?: { search?: string; cursor?: string }) {
   return useQuery({
-    queryKey: ["actions"],
-    queryFn: listActions,
+    queryKey: ["actions", params?.search, params?.cursor],
+    queryFn: () => listActions(params),
   });
 }
 

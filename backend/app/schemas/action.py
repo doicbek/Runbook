@@ -44,3 +44,8 @@ class ActionListResponse(BaseModel):
     depth: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class PaginatedActionsResponse(BaseModel):
+    actions: list[ActionListResponse]
+    next_cursor: str | None = None

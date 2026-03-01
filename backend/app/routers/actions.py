@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.database import get_db
 from app.models import Action, Task, AgentIteration, TaskOutput, Log, Artifact
-from app.schemas.action import ActionCreate, ActionListResponse, ActionResponse, ActionUpdate
+from app.schemas.action import ActionCreate, ActionListResponse, ActionResponse, ActionUpdate, PaginatedActionsResponse
 from app.schemas.task import TaskResponse
 from app.services.event_bus import event_bus
 
@@ -71,25 +71,54 @@ async def create_action(body: ActionCreate, db: AsyncSession = Depends(get_db)):
     return result.scalar_one()
 
 
-@router.get("", response_model=list[ActionListResponse])
+@router.get("", response_model=PaginatedActionsResponse)
 async def list_actions(
     status: str | None = None,
+    search: str | None = None,
+    cursor: str | None = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Action).order_by(Action.updated_at.desc()).limit(limit)
+    task_count_col = func.count(Task.id).label("task_count")
+    query = (
+        select(Action, task_count_col)
+        .outerjoin(Task, Task.action_id == Action.id)
+        .group_by(Action.id)
+        .order_by(Action.updated_at.desc())
+    )
+
     if status:
         query = query.where(Action.status == status)
-    result = await db.execute(query)
-    actions = result.scalars().all()
 
-    response = []
-    for action in actions:
-        count_result = await db.execute(
-            select(func.count()).select_from(Task).where(Task.action_id == action.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(
+            (Action.title.ilike(pattern)) | (Action.root_prompt.ilike(pattern))
         )
-        task_count = count_result.scalar() or 0
-        response.append(
+
+    if cursor:
+        from datetime import datetime, timezone
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        query = query.where(Action.updated_at < cursor_dt)
+
+    # Fetch one extra to determine if there are more results
+    query = query.limit(limit + 1)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last_action = rows[-1][0]
+        next_cursor = last_action.updated_at.isoformat()
+
+    actions = []
+    for action, task_count in rows:
+        actions.append(
             ActionListResponse(
                 id=action.id,
                 title=action.title,
@@ -102,7 +131,8 @@ async def list_actions(
                 depth=action.depth or 0,
             )
         )
-    return response
+
+    return PaginatedActionsResponse(actions=actions, next_cursor=next_cursor)
 
 
 @router.get("/{action_id}/breadcrumbs")

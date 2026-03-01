@@ -1,8 +1,19 @@
 import { apiFetch } from "@/lib/api";
-import type { Action, ActionListItem } from "@/types";
+import type { Action, PaginatedActions } from "@/types";
 
-export async function listActions(): Promise<ActionListItem[]> {
-  return apiFetch<ActionListItem[]>("/actions");
+export async function listActions(params?: {
+  search?: string;
+  cursor?: string;
+  status?: string;
+  limit?: number;
+}): Promise<PaginatedActions> {
+  const searchParams = new URLSearchParams();
+  if (params?.search) searchParams.set("search", params.search);
+  if (params?.cursor) searchParams.set("cursor", params.cursor);
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const qs = searchParams.toString();
+  return apiFetch<PaginatedActions>(`/actions${qs ? `?${qs}` : ""}`);
 }
 
 export async function getAction(id: string): Promise<Action> {

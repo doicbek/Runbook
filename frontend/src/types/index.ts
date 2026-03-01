@@ -25,6 +25,11 @@ export interface ActionListItem {
   depth: number;
 }
 
+export interface PaginatedActions {
+  actions: ActionListItem[];
+  next_cursor: string | null;
+}
+
 export interface Task {
   id: string;
   action_id: string;
