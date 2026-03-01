@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useActions, useCreateAction, useDeleteAction } from "@/hooks/use-actions";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import type { ActionListItem } from "@/types";
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr);
@@ -44,11 +45,61 @@ function Spinner({ className = "" }: { className?: string }) {
   );
 }
 
+function useDebounce(value: string, delay: number) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { data: actionsData } = useActions();
-  const actions = actionsData?.actions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebounce(searchInput, 300);
+  const [cursors, setCursors] = useState<string[]>([]);
+  const currentCursor = cursors[cursors.length - 1] as string | undefined;
+  const { data: actionsData, isFetching } = useActions({
+    search: debouncedSearch || undefined,
+    cursor: currentCursor,
+  });
+
+  // Accumulate actions across pages
+  const [allActions, setAllActions] = useState<ActionListItem[]>([]);
+  const prevCursorRef = useRef<string | undefined>(undefined);
+  const prevSearchRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!actionsData?.actions) return;
+    // If search changed, reset accumulated actions
+    if (prevSearchRef.current !== debouncedSearch) {
+      setAllActions(actionsData.actions);
+      setCursors([]);
+      prevSearchRef.current = debouncedSearch;
+      prevCursorRef.current = undefined;
+      return;
+    }
+    // If cursor changed (load more was clicked), append
+    if (currentCursor && currentCursor !== prevCursorRef.current) {
+      setAllActions((prev) => [...prev, ...actionsData.actions]);
+      prevCursorRef.current = currentCursor;
+    } else if (!currentCursor) {
+      // Initial load or search reset
+      setAllActions(actionsData.actions);
+      prevCursorRef.current = undefined;
+    }
+  }, [actionsData, debouncedSearch, currentCursor]);
+
+  const actions = allActions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
+
+  const handleLoadMore = useCallback(() => {
+    if (actionsData?.next_cursor) {
+      setCursors((prev) => [...prev, actionsData.next_cursor!]);
+    }
+  }, [actionsData?.next_cursor]);
+
   const createAction = useCreateAction();
   const deleteAction = useDeleteAction();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -183,18 +234,59 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
         </div>
       </div>
 
+      {/* Search */}
+      <div className="px-3 py-1.5">
+        <div className="relative">
+          <svg
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground/60"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="6.5" cy="6.5" r="4" />
+            <path d="M9.5 9.5L14 14" strokeLinecap="round" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search actions..."
+            value={searchInput}
+            onChange={(e) => {
+              setSearchInput(e.target.value);
+              setCursors([]);
+            }}
+            className="w-full h-6 pl-7 pr-2 text-[11px] bg-muted/50 border border-border rounded text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {searchInput && (
+            <button
+              onClick={() => {
+                setSearchInput("");
+                setCursors([]);
+              }}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 flex items-center justify-center text-muted-foreground/60 hover:text-foreground"
+            >
+              <svg className="w-2.5 h-2.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Action list */}
       <div className="flex-1 overflow-y-auto py-1">
-        {!actions && (
+        {!actions && isFetching && (
           <div className="px-3 py-2 space-y-2">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-8 bg-muted/50 animate-pulse rounded" />
             ))}
           </div>
         )}
-        {actions?.length === 0 && (
+        {actions?.length === 0 && !isFetching && (
           <div className="px-3 py-6 text-center">
-            <p className="text-[11px] text-muted-foreground">No actions yet</p>
+            <p className="text-[11px] text-muted-foreground">
+              {searchInput ? "No matching actions" : "No actions yet"}
+            </p>
           </div>
         )}
         {actions?.map((action) => {
@@ -238,6 +330,15 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             </div>
           );
         })}
+        {actionsData?.next_cursor && (
+          <button
+            onClick={handleLoadMore}
+            disabled={isFetching}
+            className="w-full px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors text-center disabled:opacity-50"
+          >
+            {isFetching ? "Loading..." : "Load more"}
+          </button>
+        )}
       </div>
 
       {/* Footer nav */}
