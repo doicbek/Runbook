@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from app.config import settings
@@ -240,6 +241,39 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
         return await _anthropic_completion(config, api_key, messages, **kwargs)
     else:
         return await _openai_compatible_completion(config, api_key, messages, **kwargs)
+
+
+async def chat_completion_stream(
+    model: str, messages: list[dict], **kwargs
+) -> AsyncGenerator[str, None]:
+    """Streaming chat completion interface across all providers.
+
+    Yields text chunks as they arrive from the model.
+
+    Args:
+        model: Model name in "provider/model_id" format
+        messages: List of message dicts with "role" and "content" keys
+        **kwargs: Additional kwargs passed to the provider
+
+    Yields:
+        Text chunks from the model response.
+    """
+    config = MODEL_REGISTRY.get(model)
+    if not config:
+        raise ValueError(f"Unknown model: {model}. Available: {list(MODEL_REGISTRY.keys())}")
+
+    api_key = _get_api_key(config.api_key_setting)
+    if not api_key:
+        raise ValueError(f"No API key configured for {model} (set {config.api_key_setting})")
+
+    logger.info(f"Streaming model: {model}")
+
+    if config.provider == "anthropic":
+        async for chunk in _anthropic_stream(config, api_key, messages, **kwargs):
+            yield chunk
+    else:
+        async for chunk in _openai_compatible_stream(config, api_key, messages, **kwargs):
+            yield chunk
 
 
 async def chat_completion_with_tool(
@@ -513,3 +547,63 @@ async def _anthropic_completion(
 
     response = await client.messages.create(**anthropic_kwargs)
     return response.content[0].text if response.content else ""
+
+
+async def _anthropic_stream(
+    config: ModelConfig, api_key: str, messages: list[dict], **kwargs
+) -> AsyncGenerator[str, None]:
+    """Stream text deltas from Anthropic models."""
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(api_key=api_key)
+
+    system_text = ""
+    filtered_messages = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text += msg["content"] + "\n"
+        else:
+            filtered_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    max_tokens = kwargs.pop("max_tokens", 4096)
+
+    anthropic_kwargs: dict = {
+        "model": config.model_id,
+        "messages": filtered_messages,
+        "max_tokens": max_tokens,
+    }
+    if system_text.strip():
+        anthropic_kwargs["system"] = system_text.strip()
+    if "temperature" in kwargs:
+        anthropic_kwargs["temperature"] = kwargs.pop("temperature")
+
+    async with client.messages.stream(**anthropic_kwargs) as stream:
+        async for text in stream.text_stream:
+            yield text
+
+
+async def _openai_compatible_stream(
+    config: ModelConfig, api_key: str, messages: list[dict], **kwargs
+) -> AsyncGenerator[str, None]:
+    """Stream text deltas from OpenAI-compatible providers."""
+    from openai import AsyncOpenAI
+
+    client_kwargs: dict = {"api_key": api_key}
+    if config.base_url:
+        client_kwargs["base_url"] = config.base_url
+
+    if config.provider == "openai" and config.model_id in _MAX_COMPLETION_TOKENS_MODELS:
+        if "max_tokens" in kwargs:
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+        kwargs.pop("temperature", None)
+
+    client = AsyncOpenAI(**client_kwargs)
+    stream = await client.chat.completions.create(
+        model=config.model_id,
+        messages=messages,
+        stream=True,
+        **kwargs,
+    )
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
