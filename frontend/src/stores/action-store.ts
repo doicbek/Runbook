@@ -29,12 +29,14 @@ interface ActionStore {
   taskStreamingText: Record<string, string>;
   taskTimedOut: Record<string, boolean>;
   failureReason: string | null;
+  sseConnected: boolean;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
   setRecoveryAttempt: (attempt: number | null) => void;
   setReplanning: (v: boolean) => void;
   setFailureReason: (reason: string | null) => void;
+  setSSEConnected: (connected: boolean) => void;
   clearTaskState: () => void;
   appendTaskLog: (taskId: string, log: { level: string; message: string }) => void;
   resetForAction: (actionId: string) => void;
@@ -68,6 +70,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   taskStreamingText: {},
   taskTimedOut: {},
   failureReason: null,
+  sseConnected: true,
 
   setTaskOverride: (taskId, override) =>
     set((state) => ({
@@ -88,6 +91,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
 
   setFailureReason: (reason) =>
     set({ failureReason: reason }),
+
+  setSSEConnected: (connected) =>
+    set({ sseConnected: connected }),
 
   clearTaskState: () =>
     set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, taskTimedOut: {}, failureReason: null }),
@@ -118,6 +124,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskStreamingText: {},
       taskTimedOut: {},
       failureReason: null,
+      sseConnected: true,
     }),
 
   resetLogs: (taskId) =>

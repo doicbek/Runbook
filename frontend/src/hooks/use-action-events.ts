@@ -19,7 +19,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       connectionRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut, setSSEConnected } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -267,9 +267,11 @@ export function useActionEvents(actionId: string, enabled = true) {
       },
       () => {
         // onError — reconnect is handled automatically by createSSEConnection
+        setSSEConnected(false);
       },
       () => {
         // onOpen — connection established/recovered
+        setSSEConnected(true);
       }
     );
 

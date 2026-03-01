@@ -33,6 +33,7 @@ export function WorkspaceHeader({ action }: { action: Action }) {
   const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
   const isReplanning = useActionStore((s) => s.isReplanning);
   const failureReason = useActionStore((s) => s.failureReason);
+  const sseConnected = useActionStore((s) => s.sseConnected);
   const status = sseStatus || action.status;
   const hasPendingTasks = action.tasks.some((t) => t.status === "pending");
   const isRunning = status === "running";
@@ -108,6 +109,16 @@ export function WorkspaceHeader({ action }: { action: Action }) {
                   <path d="M10 3v3h-3" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
                 Replanning
+              </Badge>
+            )}
+            {!sseConnected && (
+              <Badge variant="secondary" className="bg-yellow-50 text-yellow-700 dark:bg-yellow-950/50 dark:text-yellow-300 gap-1">
+                <svg className="w-3 h-3 animate-pulse" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M1 9l2.5-2.5M3.5 6.5L6 4M6 4l2.5-2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4"/>
+                  <path d="M9 1l-1 1" strokeLinecap="round" opacity="0.4"/>
+                  <line x1="1" y1="1" x2="11" y2="11" strokeLinecap="round"/>
+                </svg>
+                Reconnecting...
               </Badge>
             )}
           </div>
