@@ -220,6 +220,9 @@ export function TaskCard({
           <PauseGuidancePanel actionId={actionId} taskId={task.id} />
         )}
 
+        {/* Streaming agent output — visible while running with streaming text */}
+        <StreamingOutput taskId={task.id} status={status} />
+
         {/* Iteration summary — shows agent iteration progress */}
         <IterationSummary taskId={task.id} />
 
@@ -559,6 +562,74 @@ function LiveActivityFeed({ taskId }: { taskId: string }) {
               </span>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StreamingOutput({ taskId, status }: { taskId: string; status: string }) {
+  const streamingText = useActionStore((s) => s.taskStreamingText[taskId]);
+  const [collapsed, setCollapsed] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isRunning = status === "running";
+
+  // Auto-scroll to bottom when new text arrives
+  useEffect(() => {
+    if (scrollRef.current && !collapsed) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [streamingText, collapsed]);
+
+  // Auto-collapse when task completes
+  const prevStatus = useRef(status);
+  useEffect(() => {
+    if (prevStatus.current === "running" && status !== "running") {
+      setCollapsed(true);
+    }
+    prevStatus.current = status;
+  }, [status]);
+
+  if (!streamingText) return null;
+  // Hide when completed and output_summary will be shown instead
+  if (status === "completed" && collapsed) return null;
+
+  return (
+    <div className="mx-4 mb-3">
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex items-center gap-1.5 mb-1.5 cursor-pointer w-full text-left"
+      >
+        <svg className="w-3 h-3 text-cyan-500 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M3 3l3 3-3 3M7 9h3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Agent output
+        </span>
+        {isRunning && (
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+        )}
+        <svg
+          className={`w-3 h-3 text-muted-foreground/50 ml-auto transition-transform duration-200 ${collapsed ? "" : "rotate-180"}`}
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {!collapsed && (
+        <div
+          ref={scrollRef}
+          className="relative max-h-[300px] overflow-y-auto rounded-md bg-zinc-950 border border-border p-3"
+        >
+          <pre className="text-[11px] font-mono leading-relaxed text-zinc-300 whitespace-pre-wrap break-words">
+            {streamingText}
+            {isRunning && (
+              <span className="inline-block w-1.5 h-4 bg-cyan-400 animate-pulse ml-0.5 align-middle" />
+            )}
+          </pre>
         </div>
       )}
     </div>
