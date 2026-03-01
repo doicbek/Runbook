@@ -94,6 +94,7 @@ export function TaskCard({
   const [outputExpanded, setOutputExpanded] = useState(false);
   const taskOverrides = useActionStore((s) => s.taskOverrides);
   const codeExecution = useActionStore((s) => s.codeExecutions[task.id]);
+  const timedOut = useActionStore((s) => s.taskTimedOut[task.id]);
   const override = taskOverrides[task.id];
   const runCode = useRunCode();
 
@@ -176,10 +177,26 @@ export function TaskCard({
             )}
             <Badge
               variant="outline"
-              className={`text-[10px] font-medium px-2 py-0.5 gap-1.5 ${config.badgeClass}`}
+              className={`text-[10px] font-medium px-2 py-0.5 gap-1.5 ${
+                status === "failed" && timedOut
+                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800"
+                  : config.badgeClass
+              }`}
             >
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
-              {config.label}
+              {status === "failed" && timedOut ? (
+                <>
+                  <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <circle cx="6" cy="6" r="4.5" />
+                    <path d="M6 3.5V6l2 1" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Timed out
+                </>
+              ) : (
+                <>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
+                  {config.label}
+                </>
+              )}
             </Badge>
           </div>
         </div>

@@ -33,6 +33,7 @@ export function useUpdateTask() {
       model?: string | null;
       agent_type?: string;
       dependencies?: string[];
+      timeout_seconds?: number | null;
     }) => updateTask(actionId, taskId, body),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["action", data.action_id] });

@@ -34,6 +34,7 @@ export interface Task {
   model: string | null;
   dependencies: string[];
   output_summary: string | null;
+  timeout_seconds: number | null;
   sub_action_id: string | null;
   created_at: string;
   updated_at: string;

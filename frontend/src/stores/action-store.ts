@@ -27,6 +27,7 @@ interface ActionStore {
   currentIteration: Record<string, CurrentIterationInfo>;
   retryStatus: Record<string, RetryStatus>;
   taskStreamingText: Record<string, string>;
+  taskTimedOut: Record<string, boolean>;
   failureReason: string | null;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
@@ -43,6 +44,7 @@ interface ActionStore {
   updateCurrentIteration: (taskId: string, info: Partial<CurrentIterationInfo>) => void;
   setRetryStatus: (taskId: string, status: RetryStatus | null) => void;
   appendTaskStreamingText: (taskId: string, chunk: string) => void;
+  setTaskTimedOut: (taskId: string, timedOut: boolean) => void;
 }
 
 const defaultCodeState: CodeExecutionState = {
@@ -64,6 +66,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   currentIteration: {},
   retryStatus: {},
   taskStreamingText: {},
+  taskTimedOut: {},
   failureReason: null,
 
   setTaskOverride: (taskId, override) =>
@@ -87,7 +90,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     set({ failureReason: reason }),
 
   clearTaskState: () =>
-    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, failureReason: null }),
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, taskTimedOut: {}, failureReason: null }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -113,6 +116,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       currentIteration: {},
       retryStatus: {},
       taskStreamingText: {},
+      taskTimedOut: {},
       failureReason: null,
     }),
 
@@ -170,6 +174,14 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskStreamingText: {
         ...state.taskStreamingText,
         [taskId]: (state.taskStreamingText[taskId] || "") + chunk,
+      },
+    })),
+
+  setTaskTimedOut: (taskId, timedOut) =>
+    set((state) => ({
+      taskTimedOut: {
+        ...state.taskTimedOut,
+        [taskId]: timedOut,
       },
     })),
 }));

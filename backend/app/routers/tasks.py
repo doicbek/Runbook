@@ -96,6 +96,8 @@ async def update_task(
         task.agent_type = body.agent_type
     if body.dependencies is not None:
         task.dependencies = body.dependencies
+    if body.timeout_seconds is not None:
+        task.timeout_seconds = body.timeout_seconds
 
     # Reset this task to pending
     task.status = "pending"

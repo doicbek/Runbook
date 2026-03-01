@@ -14,6 +14,8 @@
 - CodingAgent pattern: normalize messages to OpenAI dict format, convert for Anthropic at call time
 - Pause/resume uses in-memory `pause_manager` singleton; CodingAgent checks between iterations; task status 'paused' is valid
 - `diff2html` is available for rendering unified diffs; use `ColorSchemeType` enum from `diff2html/lib/types`, not string literals
+- BaseAgent.stream_callback is set by executor before execute() — agents call `await self.stream_callback(chunk)` to publish LLM chunks via SSE
+- Zustand store `taskStreamingText` holds per-task streaming text buffer; `appendTaskStreamingText(taskId, chunk)` appends
 
 ---
 
@@ -361,6 +363,20 @@
   - Tool schemas use standard JSON Schema; for nullable fields use `"type": ["string", "null"]`
 ---
 
+## 2026-03-01 - US-006
+- Added `chat_completion_stream(model, messages, **kwargs) -> AsyncGenerator[str, None]` to llm_client.py
+- Anthropic streaming via `client.messages.stream()` context manager, yielding from `stream.text_stream`
+- OpenAI-compatible streaming via `AsyncOpenAI` with `stream=True`, yielding `delta.content` chunks
+- Same provider routing logic as `chat_completion` (Anthropic vs OpenAI-compatible)
+- Both stream implementations handle the same kwargs normalization (max_tokens, temperature, _MAX_COMPLETION_TOKENS_MODELS)
+- Files changed: `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - Anthropic streaming: `async with client.messages.stream(**kwargs) as stream: async for text in stream.text_stream: yield text`
+  - OpenAI streaming: `stream=True` kwarg, then `async for chunk in stream: chunk.choices[0].delta.content`
+  - AsyncGenerator return type needs `from collections.abc import AsyncGenerator`
+  - For async generators that delegate to other async generators, use `async for x in inner(): yield x` pattern
+---
+
 ## 2026-03-01 - US-005
 - Updated GET /planner-config to include `available_models` field with all models that have configured API keys
 - Added `AvailableModel` schema to `planner_config.py` schemas
@@ -377,4 +393,74 @@
   - `planner_completion()` handles multi-provider fallback for planning calls — use it instead of direct AsyncOpenAI
   - The preview endpoint was the last place using direct AsyncOpenAI — now fully migrated
   - Frontend model dropdowns should use `providerOrder` array for consistent ordering across the app
+---
+
+## 2026-03-01 - US-008
+- Added `StreamingOutput` component to TaskCard that displays real-time agent output from `taskStreamingText` Zustand store
+- Collapsible section with "Agent output" header, cyan accent color, blinking cursor indicator while running
+- Monospace pre block on dark zinc-950 background with auto-scroll to bottom
+- Auto-collapses when task status transitions from running to completed/failed
+- Hidden entirely when task is completed and collapsed (output_summary takes over)
+- Files changed: `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - `useRef` for tracking previous status value enables detecting status transitions (running → completed)
+  - StreamingOutput reads directly from Zustand `taskStreamingText` store — no prop drilling needed
+  - The component returns null when no streaming text exists, so non-streaming agents are unaffected
+---
+
+## 2026-03-01 - US-007
+- Added `supports_streaming: bool = False` class attribute to BaseAgent
+- Added `stream_callback` attribute to BaseAgent — async callable set by executor, agents call it to publish LLM chunks
+- Executor `_run_task` creates stream callback that publishes `task.llm_chunk` SSE events for agents with `supports_streaming=True`
+- Stream callback also set up for retry attempts
+- Registered `task.llm_chunk` event type in frontend `sse.ts`
+- Added `taskStreamingText: Record<string, string>` to Zustand action store with `appendTaskStreamingText` method
+- Added `task.llm_chunk` case handler in `use-action-events.ts`
+- Cleared `taskStreamingText` in `clearTaskState` and `resetForAction`
+- Files changed: `backend/app/services/agents/base.py`, `backend/app/services/executor.py`, `frontend/src/lib/sse.ts`, `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`
+- **Learnings for future iterations:**
+  - Stream callback pattern: executor attaches callback to agent instance before execute(), agent calls it during LLM streaming
+  - No changes needed to event_bus — it already supports arbitrary event types via publish()
+  - Zustand string append pattern: `(state.map[key] || "") + chunk` for efficient streaming buffer
+  - SSE event types just need to be added to the `eventTypes` array in sse.ts — the handler is in the switch in use-action-events.ts
+---
+
+## 2026-03-01 - US-009
+- Added `AGENT_TIMEOUTS` dict to `backend/app/config.py`: code_execution=600, coding=900, sub_action=1200, default=300
+- Added `timeout_seconds` column (Integer, nullable) to Task model in `backend/app/models/task.py`
+- Added idempotent `ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER` migration in `init_db()`
+- Files changed: `backend/app/config.py`, `backend/app/models/task.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - `AGENT_TIMEOUTS` is a module-level dict in config.py (not a Settings field) since it's not env-configurable
+  - Import `Integer` from sqlalchemy for integer columns; use `Mapped[int | None]` for nullable ints
+  - The timeout resolution order (task override > agent default > 300) will be implemented in the executor (US-010)
+---
+
+## 2026-03-01 - US-010
+- Wrapped agent execution with `asyncio.wait_for(agent.execute(...), timeout=resolved_timeout)` in `_run_task()`
+- Timeout resolution: `task.timeout_seconds` > `AGENT_TIMEOUTS[agent_type]` > `AGENT_TIMEOUTS["default"]` (300s)
+- On `asyncio.TimeoutError`: task marked failed immediately with "Task timed out after N seconds", no retry loop
+- `task.failed` SSE event includes `timeout: true` when timeout caused the failure
+- Both primary execution and retry attempts are timeout-wrapped
+- Added `timeout_seconds` parameter to `_run_task` signature, passed from dispatch site as `t.timeout_seconds`
+- Imported `AGENT_TIMEOUTS` from `app.config`
+- Files changed: `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - `asyncio.wait_for` raises `asyncio.TimeoutError` — catch it before the generic `Exception` handler
+  - Timeouts should bypass the retry loop (they indicate the task is fundamentally too slow, not transiently failing)
+  - The `or` chain for timeout resolution works because `None or X` returns `X` in Python
+---
+
+## 2026-03-01 - US-011
+- Added "Timed out" badge (clock icon + amber styling) to TaskCard when `task.failed` SSE event has `timeout: true`
+- Added `taskTimedOut` state map to Zustand store with `setTaskTimedOut` method
+- Updated `use-action-events.ts` to track timeout flag from `task.failed` events
+- Added timeout override input field to TaskCardEditor (number input with agent-type-aware default placeholder)
+- Added `timeout_seconds` to: Task TypeScript type, TaskUpdate backend schema, TaskResponse backend schema, updateTask API function, useUpdateTask hook
+- Backend PATCH endpoint now handles `timeout_seconds` field
+- Files changed: `backend/app/schemas/task.py`, `backend/app/routers/tasks.py`, `frontend/src/types/index.ts`, `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`, `frontend/src/components/workspace/task-card.tsx`, `frontend/src/components/workspace/task-card-editor.tsx`, `frontend/src/lib/api/tasks.ts`, `frontend/src/hooks/use-tasks.ts`
+- **Learnings for future iterations:**
+  - `taskTimedOut` is a separate Zustand state map (not in `taskOverrides`) since `Partial<Task>` doesn't have a timedOut field
+  - Agent timeout defaults: code_execution=600, coding=900, sub_action=1200, default=300
+  - The timeout input uses placeholder to show the agent default rather than a separate label
 ---

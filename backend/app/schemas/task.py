@@ -15,6 +15,7 @@ class TaskUpdate(BaseModel):
     model: str | None = None
     agent_type: str | None = None
     dependencies: list[str] | None = None
+    timeout_seconds: int | None = None
 
 
 class TaskResponse(BaseModel):
@@ -26,6 +27,7 @@ class TaskResponse(BaseModel):
     model: str | None = None
     dependencies: list[str]
     output_summary: str | None = None
+    timeout_seconds: int | None = None
     sub_action_id: str | None = None
     workspace_path: str | None = None
     workspace_branch: str | None = None

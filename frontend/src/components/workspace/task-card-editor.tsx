@@ -25,6 +25,9 @@ export function TaskCardEditor({
   const [selectedDeps, setSelectedDeps] = useState<string[]>(task.dependencies);
   const [selectedModel, setSelectedModel] = useState<string>(task.model || "");
   const [selectedAgentType, setSelectedAgentType] = useState<string>(task.agent_type || "");
+  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(
+    task.timeout_seconds != null ? String(task.timeout_seconds) : ""
+  );
   const updateTask = useUpdateTask();
   const { data: modelsData } = useAvailableModels();
   const { data: agentsData } = useAgentDefinitions();
@@ -60,6 +63,7 @@ export function TaskCardEditor({
 
   const handleSave = async () => {
     if (!prompt.trim()) return;
+    const parsedTimeout = timeoutSeconds.trim() ? parseInt(timeoutSeconds, 10) : null;
     await updateTask.mutateAsync({
       actionId,
       taskId: task.id,
@@ -67,6 +71,7 @@ export function TaskCardEditor({
       model: selectedModel || null,
       agent_type: selectedAgentType || undefined,
       dependencies: selectedDeps,
+      timeout_seconds: parsedTimeout && !isNaN(parsedTimeout) ? parsedTimeout : null,
     });
     onClose();
   };
@@ -132,6 +137,22 @@ export function TaskCardEditor({
             </select>
           </div>
         )}
+        {/* Timeout override */}
+        <div>
+          <label className="text-xs font-medium mb-1 block">
+            Timeout (seconds)
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={timeoutSeconds}
+            onChange={(e) => setTimeoutSeconds(e.target.value)}
+            placeholder={`Default: ${
+              { code_execution: 600, coding: 900, sub_action: 1200 }[selectedAgentType] ?? 300
+            }s`}
+            className="w-full text-xs border rounded-md px-2 py-1.5 bg-background text-foreground"
+          />
+        </div>
         {availableDeps.length > 0 && (
           <div>
             <label className="text-xs font-medium mb-1 block">

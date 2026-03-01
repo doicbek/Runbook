@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -63,6 +63,9 @@ export function useActionEvents(actionId: string, enabled = true) {
               status: "failed",
               output_summary: (data.output_summary as string) || (data.error as string),
             });
+            if (data.timeout) {
+              setTaskTimedOut(data.task_id as string, true);
+            }
             break;
           case "task.recovering":
             // Task is attempting inline recovery — keep it as "running"
