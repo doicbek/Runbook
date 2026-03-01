@@ -24,6 +24,7 @@ export function createSSEConnection(
     "code.completed",
     "code.failed",
     "code.log",
+    "task.llm_chunk",
     "ping",
   ];
 

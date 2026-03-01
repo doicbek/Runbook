@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 
 class BaseAgent(ABC):
     mcp_config: dict | None = None
+    supports_streaming: bool = False
+    # Set by executor before execute() — agents call this to publish LLM chunks
+    stream_callback: Callable[[str], Coroutine[Any, Any, None]] | None = None
 
     @abstractmethod
     async def execute(

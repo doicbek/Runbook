@@ -26,6 +26,7 @@ interface ActionStore {
   taskIterations: Record<string, AgentIteration[]>;
   currentIteration: Record<string, CurrentIterationInfo>;
   retryStatus: Record<string, RetryStatus>;
+  taskStreamingText: Record<string, string>;
   failureReason: string | null;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
@@ -41,6 +42,7 @@ interface ActionStore {
   addIteration: (taskId: string, iteration: AgentIteration) => void;
   updateCurrentIteration: (taskId: string, info: Partial<CurrentIterationInfo>) => void;
   setRetryStatus: (taskId: string, status: RetryStatus | null) => void;
+  appendTaskStreamingText: (taskId: string, chunk: string) => void;
 }
 
 const defaultCodeState: CodeExecutionState = {
@@ -61,6 +63,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   taskIterations: {},
   currentIteration: {},
   retryStatus: {},
+  taskStreamingText: {},
   failureReason: null,
 
   setTaskOverride: (taskId, override) =>
@@ -84,7 +87,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     set({ failureReason: reason }),
 
   clearTaskState: () =>
-    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, failureReason: null }),
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, failureReason: null }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -109,6 +112,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskIterations: {},
       currentIteration: {},
       retryStatus: {},
+      taskStreamingText: {},
       failureReason: null,
     }),
 
@@ -160,4 +164,12 @@ export const useActionStore = create<ActionStore>((set, get) => ({
         retryStatus: { ...state.retryStatus, [taskId]: status },
       };
     }),
+
+  appendTaskStreamingText: (taskId, chunk) =>
+    set((state) => ({
+      taskStreamingText: {
+        ...state.taskStreamingText,
+        [taskId]: (state.taskStreamingText[taskId] || "") + chunk,
+      },
+    })),
 }));

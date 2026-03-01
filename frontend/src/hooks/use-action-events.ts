@@ -20,7 +20,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       eventSourceRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -257,6 +257,11 @@ export function useActionEvents(actionId: string, enabled = true) {
               level: "info",
               message: `User guidance: ${(data.guidance as string) || "resumed"}`,
             });
+            break;
+
+          // --- Streaming LLM output ---
+          case "task.llm_chunk":
+            appendTaskStreamingText(data.task_id as string, data.chunk as string);
             break;
         }
       },

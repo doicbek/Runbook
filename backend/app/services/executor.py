@@ -861,6 +861,15 @@ async def _run_task(
             defn = result.scalar_one_or_none()
             if defn and defn.mcp_config:
                 agent.mcp_config = defn.mcp_config
+            # Attach stream callback for agents that support streaming
+            if agent.supports_streaming:
+                async def _stream_cb(chunk: str) -> None:
+                    await event_bus.publish(action_id, "task.llm_chunk", {
+                        "task_id": task_id,
+                        "chunk": chunk,
+                        "model": model or agent_type,
+                    })
+                agent.stream_callback = _stream_cb
         result = await agent.execute(task_id, effective_prompt, dep_outputs, log_callback, model=model)
 
         # Success — save output and return
@@ -977,6 +986,14 @@ async def _run_task(
                     defn = defn_result.scalar_one_or_none()
                     if defn and defn.mcp_config:
                         agent.mcp_config = defn.mcp_config
+                    if agent.supports_streaming:
+                        async def _retry_stream_cb(chunk: str) -> None:
+                            await event_bus.publish(action_id, "task.llm_chunk", {
+                                "task_id": task_id,
+                                "chunk": chunk,
+                                "model": model or agent_type,
+                            })
+                        agent.stream_callback = _retry_stream_cb
                 result = await agent.execute(
                     task_id, retry_prompt, dep_outputs, log_callback, model=model
                 )
