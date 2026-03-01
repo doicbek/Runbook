@@ -160,6 +160,13 @@ DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
 
 FALLBACK_MODEL = "openai/gpt-5"
 
+# Cheap utility models ordered by preference — used by utility_completion()
+UTILITY_MODEL_CHAIN: list[str] = [
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-chat",
+    "openai/gpt-5-mini",
+]
+
 
 def _get_api_key(setting_name: str) -> str:
     return getattr(settings, setting_name, "")
@@ -220,6 +227,36 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
         return await _anthropic_completion(config, api_key, messages, **kwargs)
     else:
         return await _openai_compatible_completion(config, api_key, messages, **kwargs)
+
+
+async def utility_completion(messages: list[dict], **kwargs) -> str:
+    """Cheap utility LLM call with automatic fallback chain.
+
+    Iterates UTILITY_MODEL_CHAIN, skipping models without API keys.
+    If a model errors at runtime, catches the exception and tries the next.
+    Raises the last exception if all models fail.
+    """
+    last_exc: Exception | None = None
+    for model in UTILITY_MODEL_CHAIN:
+        config = MODEL_REGISTRY.get(model)
+        if not config:
+            continue
+        api_key = _get_api_key(config.api_key_setting)
+        if not api_key:
+            logger.debug(f"utility_completion: skipping {model} (no API key)")
+            continue
+        try:
+            return await chat_completion(model, messages, **kwargs)
+        except Exception as exc:
+            logger.warning(f"utility_completion: {model} failed: {exc}")
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError(
+        "utility_completion: no models available. "
+        "Set at least one API key for: "
+        + ", ".join(UTILITY_MODEL_CHAIN)
+    )
 
 
 # Models that require max_completion_tokens instead of max_tokens
