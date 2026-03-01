@@ -547,7 +547,7 @@ async def _transform_to_acquisition(
 async def _compress_for_handoff(raw_output: str) -> str:
     """Compress verbose task output into a dense summary for downstream agents.
 
-    Only compresses outputs longer than 800 chars. Uses gpt-5-mini for fast,
+    Only compresses outputs longer than 800 chars. Uses utility_completion for fast,
     cheap compression that preserves all critical data (numbers, paths, artifacts,
     column names, tabular structure). Falls back to truncation on LLM failure.
     """
@@ -557,7 +557,7 @@ async def _compress_for_handoff(raw_output: str) -> str:
     if len(raw_output) <= _COMPRESS_THRESHOLD:
         return raw_output
 
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     system = (
         "You are a context compression assistant. Compress the following task output "
@@ -577,8 +577,7 @@ async def _compress_for_handoff(raw_output: str) -> str:
     )
 
     try:
-        compressed = await chat_completion(
-            "gpt-5-mini",
+        compressed = await utility_completion(
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": raw_output[:_INPUT_CAP]},
@@ -652,7 +651,7 @@ async def _triage_failure(
 
     Returns 'retry' or 'recovery'.
     """
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     prior_context = ""
     if prior_attempts:
@@ -685,8 +684,7 @@ async def _triage_failure(
     )
 
     try:
-        raw = await chat_completion(
-            "gpt-5-mini",
+        raw = await utility_completion(
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

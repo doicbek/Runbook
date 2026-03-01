@@ -45,11 +45,10 @@ async def generate_skill_from_success(
     If a skill with the same pattern_key exists, bumps recurrence and refines.
     Otherwise creates a new skill.
     """
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     try:
-        raw = await chat_completion(
-            "gpt-5-mini",
+        raw = await utility_completion(
             [
                 {
                     "role": "system",
@@ -168,11 +167,10 @@ async def generate_skill_from_failure(
     Captures what went wrong and how to avoid it, producing actionable
     corrective knowledge rather than just logging the error.
     """
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     try:
-        raw = await chat_completion(
-            "gpt-5-mini",
+        raw = await utility_completion(
             [
                 {
                     "role": "system",
@@ -286,11 +284,10 @@ async def generate_correction_skill(
 
     This captures the *fix* — what worked after earlier attempts failed.
     """
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     try:
-        raw = await chat_completion(
-            "gpt-5-mini",
+        raw = await utility_completion(
             [
                 {
                     "role": "system",
@@ -468,11 +465,10 @@ async def get_skills_summary_for_planner(db: AsyncSession) -> str:
 
 async def _refine_description(existing: str, new: str) -> str:
     """Merge an existing skill description with a new observation."""
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     try:
-        refined = await chat_completion(
-            "gpt-5-mini",
+        refined = await utility_completion(
             [
                 {
                     "role": "system",
@@ -506,11 +502,10 @@ async def extract_concepts_from_skill(skill_id: str, skill_title: str, skill_des
     creates SkillConcept nodes for each, and links them to the skill via
     SkillRelation edges (uses_tool, produces, avoids).
     """
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     try:
-        raw = await chat_completion(
-            "gpt-5-mini",
+        raw = await utility_completion(
             [
                 {
                     "role": "system",

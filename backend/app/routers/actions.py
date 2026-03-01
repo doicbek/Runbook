@@ -18,18 +18,11 @@ router = APIRouter(prefix="/actions", tags=["actions"])
 
 async def _generate_title(prompt: str) -> str:
     """Generate a short title for an action using an LLM."""
-    from app.config import settings
-
-    if not settings.OPENAI_API_KEY:
-        return prompt[:80]
-
     try:
-        from openai import AsyncOpenAI
+        from app.services.llm_client import utility_completion
 
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
+        title = await utility_completion(
+            [
                 {
                     "role": "system",
                     "content": "Generate a short, descriptive title (3-8 words) for the following task prompt. Return ONLY the title, no quotes, no punctuation at the end.",
@@ -39,7 +32,7 @@ async def _generate_title(prompt: str) -> str:
             max_tokens=30,
             temperature=0.3,
         )
-        title = (response.choices[0].message.content or "").strip().strip('"\'.')
+        title = title.strip().strip('"\'.')
         return title or prompt[:80]
     except Exception:
         return prompt[:80]

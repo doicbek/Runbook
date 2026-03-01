@@ -34,7 +34,7 @@ async def generate_and_save_lesson(
     error: str,
 ) -> None:
     """Call a fast LLM to generate/revise a lesson from a failure and persist it."""
-    from app.services.llm_client import chat_completion
+    from app.services.llm_client import utility_completion
 
     existing = load_memory(agent_type)
     existing_block = (
@@ -44,8 +44,7 @@ async def generate_and_save_lesson(
     )
 
     try:
-        lesson = await chat_completion(
-            "gpt-5-mini",
+        lesson = await utility_completion(
             [
                 {
                     "role": "system",
