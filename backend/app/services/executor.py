@@ -13,6 +13,7 @@ from app.models.agent_definition import AgentDefinition
 from app.models.agent_iteration import AgentIteration
 from app.services.agents.exceptions import InputUnavailableError
 from app.services.agents.registry import get_agent_async
+from app.config import AGENT_TIMEOUTS
 from app.services.event_bus import event_bus
 from app.services.recovery_planner import MAX_FULL_REPLANS, MAX_RECOVERY_ATTEMPTS, plan_recovery
 
@@ -305,7 +306,7 @@ async def _run_dag_pass(action_id: str):
             continue
 
         coros = [
-            _run_task(action_id, t.id, t.prompt, t.agent_type, t.dependencies, t.model)
+            _run_task(action_id, t.id, t.prompt, t.agent_type, t.dependencies, t.model, t.timeout_seconds)
             for t in ready
         ]
         await asyncio.gather(*coros, return_exceptions=True)
@@ -783,6 +784,7 @@ async def _run_task(
     agent_type: str,
     dependency_ids: list[str],
     model: str | None = None,
+    timeout_seconds: int | None = None,
 ):
     """Run a single task with the appropriate agent.
 
@@ -790,6 +792,12 @@ async def _run_task(
     augmented prompt containing structured failure history. Creates
     AgentIteration records for each retry attempt.
     """
+    # Resolve timeout: task override > agent-type default > global default
+    resolved_timeout = (
+        timeout_seconds
+        or AGENT_TIMEOUTS.get(agent_type)
+        or AGENT_TIMEOUTS.get("default", 300)
+    )
     await event_bus.publish(action_id, "task.started", {
         "task_id": task_id,
         "action_id": action_id,
@@ -870,10 +878,34 @@ async def _run_task(
                         "model": model or agent_type,
                     })
                 agent.stream_callback = _stream_cb
-        result = await agent.execute(task_id, effective_prompt, dep_outputs, log_callback, model=model)
+        result = await asyncio.wait_for(
+            agent.execute(task_id, effective_prompt, dep_outputs, log_callback, model=model),
+            timeout=resolved_timeout,
+        )
 
         # Success — save output and return
         await _save_task_success(action_id, task_id, result)
+        return
+
+    except asyncio.TimeoutError:
+        timeout_msg = f"Task timed out after {resolved_timeout} seconds"
+        logger.error(f"Task {task_id}: {timeout_msg}")
+        await log_callback("error", timeout_msg)
+
+        # Mark task as failed immediately — no retry for timeouts
+        async with async_session() as db:
+            task_result = await db.execute(select(Task).where(Task.id == task_id))
+            task = task_result.scalar_one()
+            task.status = "failed"
+            task.output_summary = timeout_msg
+            await db.commit()
+
+        await event_bus.publish(action_id, "task.failed", {
+            "task_id": task_id,
+            "error": timeout_msg,
+            "output_summary": timeout_msg,
+            "timeout": True,
+        })
         return
 
     except InputUnavailableError as e:
@@ -994,9 +1026,14 @@ async def _run_task(
                                 "model": model or agent_type,
                             })
                         agent.stream_callback = _retry_stream_cb
-                result = await agent.execute(
-                    task_id, retry_prompt, dep_outputs, log_callback, model=model
+                result = await asyncio.wait_for(
+                    agent.execute(
+                        task_id, retry_prompt, dep_outputs, log_callback, model=model
+                    ),
+                    timeout=resolved_timeout,
                 )
+            except asyncio.TimeoutError:
+                attempt_error = f"Task timed out after {resolved_timeout} seconds"
             except Exception as e:
                 attempt_error = str(e)
 
