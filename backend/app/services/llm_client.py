@@ -167,6 +167,14 @@ UTILITY_MODEL_CHAIN: list[str] = [
     "openai/gpt-5-mini",
 ]
 
+# Planner models ordered by preference — used by planner_completion()
+PLANNER_MODEL_CHAIN: list[str] = [
+    "anthropic/claude-opus-4-6",
+    "anthropic/claude-sonnet-4-6",
+    "google/gemini-2.5-pro",
+    "openai/gpt-5",
+]
+
 
 def _get_api_key(setting_name: str) -> str:
     return getattr(settings, setting_name, "")
@@ -234,6 +242,139 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
         return await _openai_compatible_completion(config, api_key, messages, **kwargs)
 
 
+async def chat_completion_with_tool(
+    model: str,
+    messages: list[dict],
+    tool_name: str,
+    tool_schema: dict,
+    **kwargs,
+) -> dict | None:
+    """Call an LLM with a single tool definition and return the parsed tool call arguments.
+
+    For Anthropic: uses tool_use with tool_choice={"type": "tool", "name": tool_name}.
+    For OpenAI-compatible: uses tools with tool_choice={"type": "function", "function": {"name": tool_name}}.
+
+    Args:
+        model: Model name in "provider/model_id" format
+        messages: List of message dicts
+        tool_name: Name of the tool
+        tool_schema: JSON schema for the tool's input parameters
+        **kwargs: Additional provider kwargs (max_tokens, temperature, etc.)
+
+    Returns:
+        Parsed dict of tool call arguments, or None if the model didn't call the tool.
+    """
+    import json as _json
+
+    config = MODEL_REGISTRY.get(model)
+    if not config:
+        raise ValueError(f"Unknown model: {model}. Available: {list(MODEL_REGISTRY.keys())}")
+
+    api_key = _get_api_key(config.api_key_setting)
+    if not api_key:
+        raise ValueError(f"No API key configured for {model} (set {config.api_key_setting})")
+
+    logger.info(f"Using model (tool call): {model}")
+
+    if config.provider == "anthropic":
+        return await _anthropic_tool_call(config, api_key, messages, tool_name, tool_schema, **kwargs)
+    else:
+        return await _openai_tool_call(config, api_key, messages, tool_name, tool_schema, **kwargs)
+
+
+async def _anthropic_tool_call(
+    config: ModelConfig,
+    api_key: str,
+    messages: list[dict],
+    tool_name: str,
+    tool_schema: dict,
+    **kwargs,
+) -> dict | None:
+    """Anthropic tool_use: define a tool and force the model to call it."""
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(api_key=api_key)
+
+    system_text = ""
+    filtered_messages = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text += msg["content"] + "\n"
+        else:
+            filtered_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    max_tokens = kwargs.pop("max_tokens", 8192)
+
+    anthropic_kwargs: dict = {
+        "model": config.model_id,
+        "messages": filtered_messages,
+        "max_tokens": max_tokens,
+        "tools": [
+            {
+                "name": tool_name,
+                "description": f"Output structured data matching the {tool_name} schema.",
+                "input_schema": tool_schema,
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": tool_name},
+    }
+    if system_text.strip():
+        anthropic_kwargs["system"] = system_text.strip()
+    if "temperature" in kwargs:
+        anthropic_kwargs["temperature"] = kwargs.pop("temperature")
+
+    response = await client.messages.create(**anthropic_kwargs)
+
+    for block in response.content:
+        if block.type == "tool_use" and block.name == tool_name:
+            return block.input  # type: ignore[return-value]
+    return None
+
+
+async def _openai_tool_call(
+    config: ModelConfig,
+    api_key: str,
+    messages: list[dict],
+    tool_name: str,
+    tool_schema: dict,
+    **kwargs,
+) -> dict | None:
+    """OpenAI-compatible tool call: define a function tool and force the model to call it."""
+    import json as _json
+    from openai import AsyncOpenAI
+
+    client_kwargs: dict = {"api_key": api_key}
+    if config.base_url:
+        client_kwargs["base_url"] = config.base_url
+
+    if config.provider == "openai" and config.model_id in _MAX_COMPLETION_TOKENS_MODELS:
+        if "max_tokens" in kwargs:
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+        kwargs.pop("temperature", None)
+
+    client = AsyncOpenAI(**client_kwargs)
+    response = await client.chat.completions.create(
+        model=config.model_id,
+        messages=messages,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": f"Output structured data matching the {tool_name} schema.",
+                    "parameters": tool_schema,
+                },
+            }
+        ],
+        tool_choice={"type": "function", "function": {"name": tool_name}},
+        **kwargs,
+    )
+    msg = response.choices[0].message
+    if msg.tool_calls:
+        return _json.loads(msg.tool_calls[0].function.arguments)
+    return None
+
+
 async def utility_completion(messages: list[dict], **kwargs) -> str:
     """Cheap utility LLM call with automatic fallback chain.
 
@@ -261,6 +402,46 @@ async def utility_completion(messages: list[dict], **kwargs) -> str:
         "utility_completion: no models available. "
         "Set at least one API key for: "
         + ", ".join(UTILITY_MODEL_CHAIN)
+    )
+
+
+async def planner_completion(
+    messages: list[dict],
+    tool_name: str,
+    tool_schema: dict,
+    model_override: str | None = None,
+    **kwargs,
+) -> dict | None:
+    """Planner LLM call with fallback chain, using tool_use for structured output.
+
+    If model_override is set, tries that model first. Then iterates PLANNER_MODEL_CHAIN.
+    """
+    chain = list(PLANNER_MODEL_CHAIN)
+    if model_override:
+        # Put override at front, remove from chain to avoid double-trying
+        chain = [model_override] + [m for m in chain if m != model_override]
+
+    last_exc: Exception | None = None
+    for model in chain:
+        config = MODEL_REGISTRY.get(model)
+        if not config:
+            continue
+        api_key = _get_api_key(config.api_key_setting)
+        if not api_key:
+            logger.debug(f"planner_completion: skipping {model} (no API key)")
+            continue
+        try:
+            result = await chat_completion_with_tool(model, messages, tool_name, tool_schema, **kwargs)
+            return result
+        except Exception as exc:
+            logger.warning(f"planner_completion: {model} failed: {exc}")
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError(
+        "planner_completion: no models available. "
+        "Set at least one API key for: "
+        + ", ".join(PLANNER_MODEL_CHAIN)
     )
 
 

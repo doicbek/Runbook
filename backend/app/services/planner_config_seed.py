@@ -3,7 +3,6 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.planner_config import PlannerConfig
 from app.services.planner import SYSTEM_PROMPT
 
@@ -17,7 +16,7 @@ async def seed_planner_config(db: AsyncSession) -> None:
         cfg = PlannerConfig(
             id="default",
             system_prompt=SYSTEM_PROMPT,
-            model=settings.OPENAI_MODEL,
+            model="anthropic/claude-opus-4-6",
             max_tasks=8,
             max_retries=2,
         )

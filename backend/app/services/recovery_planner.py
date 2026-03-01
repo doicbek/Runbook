@@ -1,10 +1,8 @@
 import logging
 
-from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from app.config import settings
-from app.services.llm_client import get_default_model_for_agent
+from app.services.llm_client import get_default_model_for_agent, planner_completion
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +49,35 @@ its source URL instead
 2. If the task is complex and may need multiple steps itself, use "sub_action".
 3. Keep replacement tasks focused on the same goal as the failed task.
 4. Output only the minimum tasks needed (prefer 1).
-"""
+
+You MUST call the plan_recovery tool with your proposed replacement tasks."""
+
+# JSON schema for the plan_recovery tool (matches RecoveryPlan)
+_RECOVERY_TOOL_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "reasoning": {
+            "type": "string",
+            "description": "Explanation of why the task failed and the recovery strategy",
+        },
+        "tasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Specific instruction for this replacement task"},
+                    "agent_type": {"type": "string", "description": "One of: data_retrieval, code_execution, spreadsheet, report, general, arxiv_search, sub_action"},
+                    "model": {
+                        "type": ["string", "null"],
+                        "description": "Optional model override in provider/model_id format",
+                    },
+                },
+                "required": ["prompt", "agent_type"],
+            },
+        },
+    },
+    "required": ["reasoning", "tasks"],
+}
 
 
 async def plan_recovery(
@@ -62,12 +88,6 @@ async def plan_recovery(
     upstream_summaries: dict[str, str],
 ) -> list[RecoveryTask]:
     """Return replacement task specs for a failed task, or [] if unable to plan."""
-    if not settings.OPENAI_API_KEY:
-        logger.warning("No OPENAI_API_KEY — cannot plan recovery")
-        return []
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-
     upstream_block = ""
     if upstream_summaries:
         parts = [f"- {s[:300]}" for s in upstream_summaries.values() if s]
@@ -85,19 +105,19 @@ async def plan_recovery(
     )
 
     try:
-        completion = await client.beta.chat.completions.parse(
-            model=settings.OPENAI_MODEL,
+        result = await planner_completion(
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            response_format=RecoveryPlan,
+            tool_name="plan_recovery",
+            tool_schema=_RECOVERY_TOOL_SCHEMA,
         )
-        plan = completion.choices[0].message.parsed
-        if not plan or not plan.tasks:
+        if not result or not result.get("tasks"):
             logger.warning("Recovery planner returned empty plan")
             return []
 
+        plan = RecoveryPlan(**result)
         logger.info(
             f"[RecoveryPlanner] {len(plan.tasks)} replacement task(s). "
             f"Reasoning: {plan.reasoning[:120]}"

@@ -1,13 +1,12 @@
 import logging
 import uuid
 
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.task import Task
-from app.schemas.planner import PlannerOutput
-from app.services.llm_client import get_default_model_for_agent
+from app.schemas.planner import PlannerOutput, PlannerTask
+from app.services.llm_client import get_default_model_for_agent, planner_completion
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,35 @@ IMPORTANT RULES:
 - The final report should reference and include key results: data tables, computed values, plots (by describing them), and conclusions.
 - Maximize parallelism by minimizing dependencies. Only add a dependency when a task genuinely needs the output of another task.
 
-Respond with a JSON object matching the schema exactly."""
+You MUST call the plan_tasks tool with the structured task list."""
+
+# JSON schema for the plan_tasks tool (matches PlannerOutput)
+_PLANNER_TOOL_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "tasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Specific, concrete instruction for this task"},
+                    "agent_type": {"type": "string", "description": "One of: data_retrieval, spreadsheet, code_execution, coding, report, general, arxiv_search, sub_action, mcp"},
+                    "dependencies": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "0-based indices of tasks this depends on (must reference earlier tasks only)",
+                    },
+                    "model": {
+                        "type": ["string", "null"],
+                        "description": "Optional model override in provider/model_id format",
+                    },
+                },
+                "required": ["prompt", "agent_type", "dependencies"],
+            },
+        },
+    },
+    "required": ["tasks"],
+}
 
 
 def _validate_dag(output: PlannerOutput) -> bool:
@@ -116,38 +143,42 @@ async def _load_planner_config(db: AsyncSession) -> tuple[str, str, int]:
             return cfg.system_prompt, cfg.model, cfg.max_retries
     except Exception:
         logger.exception("Failed to load planner config from DB, using defaults")
-    return SYSTEM_PROMPT, settings.OPENAI_MODEL, 2
+    return SYSTEM_PROMPT, "anthropic/claude-opus-4-6", 2
 
 
 async def plan_tasks(root_prompt: str, action_id: str, db: AsyncSession) -> list[Task]:
-    """Use OpenAI to decompose a prompt into tasks."""
-    if not settings.OPENAI_API_KEY:
-        logger.warning("No OPENAI_API_KEY set, using fallback single task")
-        return _fallback_tasks(root_prompt, action_id)
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-
-    system_prompt_base, model, max_retries = await _load_planner_config(db)
+    """Use LLM (with tool_use for structured output) to decompose a prompt into tasks."""
+    system_prompt_base, model_override, max_retries = await _load_planner_config(db)
     custom_agent_context = await _get_custom_agent_context(db)
     skills_context = await _get_skills_context(db)
     system_prompt = system_prompt_base + custom_agent_context + skills_context
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": root_prompt},
+    ]
+
     for attempt in range(max(max_retries, 1)):
         try:
-            logger.info(f"[Planner LLM Input] model={model} system: {system_prompt[:200]}...")
+            logger.info(f"[Planner LLM Input] model_override={model_override} system: {system_prompt[:200]}...")
             logger.info(f"[Planner LLM Input] user: {root_prompt}")
-            completion = await client.beta.chat.completions.parse(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": root_prompt},
-                ],
-                response_format=PlannerOutput,
+            result = await planner_completion(
+                messages,
+                tool_name="plan_tasks",
+                tool_schema=_PLANNER_TOOL_SCHEMA,
+                model_override=model_override,
             )
-            parsed = completion.choices[0].message.parsed
-            if parsed:
-                logger.info(f"[Planner LLM Output] {len(parsed.tasks)} tasks: {[t.prompt[:60] for t in parsed.tasks]}")
-            if parsed and _validate_dag(parsed):
+            if result is None:
+                logger.warning(f"Planner returned no tool call on attempt {attempt + 1}")
+                continue
+
+            # Parse tool call result into PlannerOutput
+            tasks_data = result.get("tasks", [])
+            parsed = PlannerOutput(
+                tasks=[PlannerTask(**t) for t in tasks_data]
+            )
+            logger.info(f"[Planner LLM Output] {len(parsed.tasks)} tasks: {[t.prompt[:60] for t in parsed.tasks]}")
+            if _validate_dag(parsed):
                 return _convert_to_models(parsed, action_id)
             logger.warning(f"Invalid DAG on attempt {attempt + 1}, retrying")
         except Exception:
