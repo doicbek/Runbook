@@ -149,16 +149,16 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 
 DEFAULT_MODELS_BY_AGENT_TYPE: dict[str, str] = {
     "arxiv_search": "anthropic/claude-sonnet-4-6",
-    "code_execution": "openai/gpt-5",
+    "code_execution": "anthropic/claude-sonnet-4-6",
     "report": "anthropic/claude-sonnet-4-6",
-    "data_retrieval": "openai/gpt-5-mini",
-    "spreadsheet": "openai/gpt-5",
-    "coding": "anthropic/claude-sonnet-4-6",   # Claude excellent for agentic coding loops
-    "general": "openai/gpt-5",
-    "mcp": "openai/gpt-5",
+    "data_retrieval": "google/gemini-2.5-flash",
+    "spreadsheet": "anthropic/claude-sonnet-4-6",
+    "coding": "anthropic/claude-opus-4-6",
+    "general": "anthropic/claude-sonnet-4-6",
+    "mcp": "anthropic/claude-sonnet-4-6",
 }
 
-FALLBACK_MODEL = "openai/gpt-5"
+FALLBACK_MODEL = "anthropic/claude-sonnet-4-6"
 
 # Cheap utility models ordered by preference — used by utility_completion()
 UTILITY_MODEL_CHAIN: list[str] = [
@@ -173,7 +173,10 @@ def _get_api_key(setting_name: str) -> str:
 
 
 def get_default_model_for_agent(agent_type: str) -> str:
-    """Return the recommended model for an agent type, falling back if the API key is missing."""
+    """Return the recommended model for an agent type, falling back if the API key is missing.
+
+    Fallback priority: Anthropic models -> Google models -> OpenAI models.
+    """
     model_name = DEFAULT_MODELS_BY_AGENT_TYPE.get(agent_type, FALLBACK_MODEL)
     config = MODEL_REGISTRY.get(model_name)
     if config and _get_api_key(config.api_key_setting):
@@ -182,10 +185,12 @@ def get_default_model_for_agent(agent_type: str) -> str:
     fallback_config = MODEL_REGISTRY.get(FALLBACK_MODEL)
     if fallback_config and _get_api_key(fallback_config.api_key_setting):
         return FALLBACK_MODEL
-    # Last resort: return whatever has a key
-    for name, cfg in MODEL_REGISTRY.items():
-        if _get_api_key(cfg.api_key_setting):
-            return name
+    # Try providers in priority order: Anthropic -> Google -> OpenAI/others
+    _PROVIDER_PRIORITY = ["anthropic", "google", "openai", "deepseek"]
+    for provider in _PROVIDER_PRIORITY:
+        for name, cfg in MODEL_REGISTRY.items():
+            if cfg.provider == provider and _get_api_key(cfg.api_key_setting):
+                return name
     return FALLBACK_MODEL
 
 
