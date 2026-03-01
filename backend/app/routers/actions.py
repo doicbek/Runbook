@@ -285,27 +285,46 @@ async def action_events(action_id: str, request: Request, db: AsyncSession = Dep
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
+    # Read Last-Event-ID for reconnect replay
+    last_event_id_header = request.headers.get("Last-Event-ID")
+    last_event_id: int | None = None
+    if last_event_id_header:
+        try:
+            last_event_id = int(last_event_id_header)
+        except (ValueError, TypeError):
+            pass
+
     async def event_generator():
         from app.database import async_session as get_session
 
         queue = event_bus.subscribe(action_id)
         try:
-            # Send initial snapshot
-            async with get_session() as snap_db:
-                result = await snap_db.execute(
-                    select(Action).options(selectinload(Action.tasks)).where(Action.id == action_id)
-                )
-                snap_action = result.scalar_one_or_none()
-                if snap_action:
-                    tasks_data = [TaskResponse.model_validate(t).model_dump(mode="json") for t in snap_action.tasks]
+            if last_event_id is not None:
+                # Reconnect: replay missed events from ring buffer
+                missed = event_bus.replay_from(action_id, last_event_id)
+                for msg in missed:
                     yield {
-                        "event": "snapshot",
-                        "data": json.dumps({
-                            "action_id": snap_action.id,
-                            "status": snap_action.status,
-                            "tasks": tasks_data,
-                        }),
+                        "id": str(msg["id"]),
+                        "event": msg["event"],
+                        "data": json.dumps(msg["data"]),
                     }
+            else:
+                # Fresh connection: send initial snapshot
+                async with get_session() as snap_db:
+                    result = await snap_db.execute(
+                        select(Action).options(selectinload(Action.tasks)).where(Action.id == action_id)
+                    )
+                    snap_action = result.scalar_one_or_none()
+                    if snap_action:
+                        tasks_data = [TaskResponse.model_validate(t).model_dump(mode="json") for t in snap_action.tasks]
+                        yield {
+                            "event": "snapshot",
+                            "data": json.dumps({
+                                "action_id": snap_action.id,
+                                "status": snap_action.status,
+                                "tasks": tasks_data,
+                            }),
+                        }
 
             while True:
                 if await request.is_disconnected():
@@ -313,6 +332,7 @@ async def action_events(action_id: str, request: Request, db: AsyncSession = Dep
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield {
+                        "id": str(msg["id"]),
                         "event": msg["event"],
                         "data": json.dumps(msg["data"]),
                     }

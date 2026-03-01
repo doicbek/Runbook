@@ -2,36 +2,33 @@
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createSSEConnection } from "@/lib/sse";
+import { createSSEConnection, type SSEConnection } from "@/lib/sse";
 import { useActionStore } from "@/stores/action-store";
 import type { AgentIteration, Task } from "@/types";
 
 export function useActionEvents(actionId: string, enabled = true) {
   const queryClientRef = useRef(useQueryClient());
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const errorCountRef = useRef(0);
+  const connectionRef = useRef<SSEConnection | null>(null);
 
   useEffect(() => {
     if (!enabled || !actionId) return;
 
     // Close stale connection
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+    if (connectionRef.current) {
+      connectionRef.current.close();
+      connectionRef.current = null;
     }
 
     const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
-    const es = createSSEConnection(
+    const conn = createSSEConnection(
       actionId,
       (event, data) => {
         // Ignore events for a different action
         const currentId = useActionStore.getState().currentActionId;
         if (currentId && currentId !== actionId) return;
-
-        errorCountRef.current = 0;
 
         switch (event) {
           case "snapshot": {
@@ -269,20 +266,18 @@ export function useActionEvents(actionId: string, enabled = true) {
         }
       },
       () => {
-        errorCountRef.current += 1;
-        if (errorCountRef.current >= 3) {
-          eventSourceRef.current?.close();
-          eventSourceRef.current = null;
-        }
+        // onError — reconnect is handled automatically by createSSEConnection
+      },
+      () => {
+        // onOpen — connection established/recovered
       }
     );
 
-    eventSourceRef.current = es;
+    connectionRef.current = conn;
 
     return () => {
-      es.close();
-      eventSourceRef.current = null;
-      errorCountRef.current = 0;
+      conn.close();
+      connectionRef.current = null;
     };
   }, [actionId, enabled]);
 }
