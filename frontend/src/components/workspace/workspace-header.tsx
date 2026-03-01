@@ -1,9 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useRunAction, useBreadcrumbs } from "@/hooks/use-actions";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useRunAction, useBreadcrumbs, useDeleteAction } from "@/hooks/use-actions";
 import { useActionStore } from "@/stores/action-store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { Action } from "@/types";
@@ -16,7 +25,10 @@ const statusColors: Record<string, string> = {
 };
 
 export function WorkspaceHeader({ action }: { action: Action }) {
+  const router = useRouter();
   const runAction = useRunAction();
+  const deleteAction = useDeleteAction();
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const sseStatus = useActionStore((s) => s.actionStatus);
   const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
   const isReplanning = useActionStore((s) => s.isReplanning);
@@ -101,6 +113,17 @@ export function WorkspaceHeader({ action }: { action: Action }) {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDeleteConfirmOpen(true)}
+              className="text-muted-foreground hover:text-red-500 h-8 w-8 p-0"
+              title="Delete action"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Button>
             {/* Resume button — only shown when there are pending tasks after an edit or failure */}
             {!isRunning && hasPendingTasks && (status === "draft" || status === "failed" || status === "completed") && (
               <Button
@@ -128,6 +151,33 @@ export function WorkspaceHeader({ action }: { action: Action }) {
           </div>
         )}
       </div>
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Action</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            This will permanently delete this action and all its tasks, outputs, and artifacts. This cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAction.isPending}
+              onClick={async () => {
+                await deleteAction.mutateAsync(action.id);
+                setDeleteConfirmOpen(false);
+                router.push("/");
+              }}
+            >
+              {deleteAction.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

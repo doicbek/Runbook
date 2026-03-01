@@ -464,3 +464,35 @@
   - Agent timeout defaults: code_execution=600, coding=900, sub_action=1200, default=300
   - The timeout input uses placeholder to show the agent default rather than a separate label
 ---
+
+## 2026-03-01 - US-012
+- Added `DELETE /actions/{action_id}` endpoint returning 204 to `backend/app/routers/actions.py`
+- BFS collects all action IDs to delete (target + sub-actions recursively via parent_action_id)
+- Cancels running executors for all actions via `_running_executors` dict
+- Collects artifact storage paths before deletion for file cleanup
+- Deletes in reverse order (children before parents): AgentIteration explicitly (not in cascade), then Action (cascades handle Task, TaskOutput, Artifact DB rows, Log)
+- Artifact files cleaned up via `os.unlink` with OSError swallowing after DB commit
+- Files changed: `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - AgentIteration has ForeignKey to both tasks.id and actions.id but NO relationship/cascade — must delete explicitly
+  - Action → Task cascade is "all, delete-orphan", Task → TaskOutput/Artifact/Log also cascaded — just deleting the Action handles most entities
+  - `_running_executors` is a module-level dict in executor.py — import it directly for cancellation
+  - Delete artifact files AFTER DB commit to avoid orphaned DB records if file deletion fails
+  - BFS + reverse order handles recursive sub-action deletion safely
+---
+
+## 2026-03-01 - US-013
+- Added `deleteAction(id)` API function to `frontend/src/lib/api/actions.ts`
+- Added `useDeleteAction()` React Query hook to `frontend/src/hooks/use-actions.ts` with actions query invalidation
+- Added trash icon button on each sidebar action row (visible on hover) with confirmation dialog
+- Added trash icon button to workspace header with confirmation dialog
+- After deletion: navigates to `/` if deleted action was the current page
+- Fixed `apiFetch` to handle 204 No Content responses (DELETE returns no body)
+- Files changed: `frontend/src/lib/api.ts`, `frontend/src/lib/api/actions.ts`, `frontend/src/hooks/use-actions.ts`, `frontend/src/components/app-sidebar.tsx`, `frontend/src/components/workspace/workspace-header.tsx`
+- **Learnings for future iterations:**
+  - `apiFetch` needs to handle 204 responses — `res.json()` throws on empty body; check `res.status === 204` and return undefined
+  - Sidebar action rows changed from `<Link>` wrapper to `<div>` with nested `<Link>` to allow sibling delete button without nesting interactive elements
+  - `group-hover:opacity-100` + `opacity-0` pattern for revealing action buttons on hover
+  - Confirmation dialogs reuse the existing `Dialog` component (no AlertDialog needed)
+  - `useDeleteAction` only invalidates the `["actions"]` list query; individual action query doesn't need invalidation since the page navigates away
+---

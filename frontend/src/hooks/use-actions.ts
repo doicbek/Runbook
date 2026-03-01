@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createAction,
+  deleteAction,
   getAction,
   getBreadcrumbs,
   listActions,
@@ -60,6 +61,16 @@ export function useRunAction() {
     mutationFn: runAction,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["action", data.id] });
+    },
+  });
+}
+
+export function useDeleteAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteAction,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["actions"] });
     },
   });
 }

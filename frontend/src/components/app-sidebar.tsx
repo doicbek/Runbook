@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useActions, useCreateAction } from "@/hooks/use-actions";
+import { useActions, useCreateAction, useDeleteAction } from "@/hooks/use-actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,9 +50,11 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
   const { data: allActions } = useActions();
   const actions = allActions?.filter((a) => (a.depth ?? 0) === 0 && a.parent_action_id === null);
   const createAction = useCreateAction();
+  const deleteAction = useDeleteAction();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,25 +201,41 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
           const isActive = pathname === `/actions/${action.id}`;
           const dot = statusDot[action.status] || statusDot.draft;
           return (
-            <Link
+            <div
               key={action.id}
-              href={`/actions/${action.id}`}
               className={`flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors group ${
                 isActive
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               }`}
             >
-              {action.status === "running" ? (
-                <Spinner className="w-3 h-3 text-blue-500 shrink-0" />
-              ) : (
-                <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-              )}
-              <span className="truncate flex-1 font-medium">{action.title}</span>
+              <Link
+                href={`/actions/${action.id}`}
+                className="flex items-center gap-2 flex-1 min-w-0"
+              >
+                {action.status === "running" ? (
+                  <Spinner className="w-3 h-3 text-blue-500 shrink-0" />
+                ) : (
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                )}
+                <span className="truncate flex-1 font-medium">{action.title}</span>
+              </Link>
               <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
                 {timeAgo(action.updated_at)}
               </span>
-            </Link>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteConfirmId(action.id);
+                }}
+                className="w-4 h-4 flex items-center justify-center text-muted-foreground/40 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                title="Delete action"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M3 4h10M6 4V3a1 1 0 011-1h2a1 1 0 011 1v1M5 4v9a1 1 0 001 1h4a1 1 0 001-1V4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -276,6 +294,35 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
         onSubmit={handleCreate}
         isPending={createAction.isPending}
       />
+
+      <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Action</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            This will permanently delete this action and all its tasks, outputs, and artifacts. This cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAction.isPending}
+              onClick={async () => {
+                if (!deleteConfirmId) return;
+                const wasViewing = pathname === `/actions/${deleteConfirmId}`;
+                await deleteAction.mutateAsync(deleteConfirmId);
+                setDeleteConfirmId(null);
+                if (wasViewing) router.push("/");
+              }}
+            >
+              {deleteAction.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

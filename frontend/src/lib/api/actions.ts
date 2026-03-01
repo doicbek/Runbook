@@ -35,6 +35,12 @@ export async function runAction(id: string): Promise<Action> {
   });
 }
 
+export async function deleteAction(id: string): Promise<void> {
+  await apiFetch<void>(`/actions/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export interface BreadcrumbItem {
   id: string;
   title: string;
