@@ -14,6 +14,11 @@ from app.models.agent_iteration import AgentIteration
 from app.services.agents.exceptions import InputUnavailableError
 from app.services.agents.registry import get_agent_async
 from app.config import AGENT_TIMEOUTS
+from app.services.dag_scheduler import (
+    collect_downstream,
+    invalidate_downstream,
+    run_dag_pass,
+)
 from app.services.event_bus import event_bus
 from app.services.recovery_planner import MAX_FULL_REPLANS, MAX_RECOVERY_ATTEMPTS, plan_recovery
 
@@ -24,44 +29,6 @@ _running_executors: dict[str, asyncio.Task] = {}
 
 # Maximum number of recovery attempts per task before giving up
 _MAX_RECOVERY_ATTEMPTS_PER_TASK = 3
-
-
-async def invalidate_downstream(
-    task_id: str, action_id: str, db: AsyncSession
-):
-    """BFS from edited task to invalidate all downstream tasks."""
-    result = await db.execute(
-        select(Task).where(Task.action_id == action_id)
-    )
-    all_tasks = {t.id: t for t in result.scalars().all()}
-
-    # Build reverse dependency map: for each task, who depends on it
-    dependents: dict[str, list[str]] = {}
-    for t in all_tasks.values():
-        for dep_id in t.dependencies:
-            dependents.setdefault(dep_id, []).append(t.id)
-
-    # BFS from task_id
-    queue = list(dependents.get(task_id, []))
-    visited = set()
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-        task = all_tasks.get(current)
-        if task:
-            task.status = "pending"
-            task.output_summary = None
-            queue.extend(dependents.get(current, []))
-
-    # Delete old outputs for invalidated tasks
-    for tid in visited:
-        result = await db.execute(
-            select(TaskOutput).where(TaskOutput.task_id == tid)
-        )
-        for output in result.scalars().all():
-            await db.delete(output)
 
 
 async def run_action(action_id: str):
@@ -137,7 +104,7 @@ async def _execute_dag(action_id: str):
     try:
         while True:  # recovery loop
             # ── inner DAG pass ──────────────────────────────────────────────
-            await _run_dag_pass(action_id)
+            await run_dag_pass(action_id, _run_task)
 
             # ── evaluate outcome ────────────────────────────────────────────
             async with async_session() as db:
@@ -264,54 +231,6 @@ async def _execute_dag(action_id: str):
         raise
 
 
-async def _run_dag_pass(action_id: str):
-    """Run the DAG until no tasks are ready and none are running."""
-    while True:
-        async with async_session() as db:
-            result = await db.execute(
-                select(Task).where(Task.action_id == action_id)
-            )
-            all_tasks = list(result.scalars().all())
-
-            completed_ids = {t.id for t in all_tasks if t.status == "completed"}
-            failed_ids = {t.id for t in all_tasks if t.status == "failed"}
-            running_ids = {t.id for t in all_tasks if t.status == "running"}
-
-            ready = []
-            for t in all_tasks:
-                if t.status == "pending":
-                    deps_met = all(d in completed_ids for d in t.dependencies)
-                    deps_failed = any(d in failed_ids for d in t.dependencies)
-                    if deps_failed:
-                        t.status = "failed"
-                        t.output_summary = "Dependency failed"
-                        await db.commit()
-                        await event_bus.publish(action_id, "task.failed", {
-                            "task_id": t.id,
-                            "error": "Dependency failed",
-                            "output_summary": "Dependency failed",
-                        })
-                    elif deps_met:
-                        ready.append(t)
-
-            if not ready and not running_ids:
-                break
-
-            for t in ready:
-                t.status = "running"
-            await db.commit()
-
-        if not ready:
-            await asyncio.sleep(0.5)
-            continue
-
-        coros = [
-            _run_task(action_id, t.id, t.prompt, t.agent_type, t.dependencies, t.model, t.timeout_seconds)
-            for t in ready
-        ]
-        await asyncio.gather(*coros, return_exceptions=True)
-
-
 async def _attempt_recovery(
     action_id: str,
     failed_tasks: list[Task],
@@ -370,7 +289,7 @@ async def _attempt_recovery(
             )
             continue
 
-        downstream_ids = _collect_downstream(failed_task.id, dependents)
+        downstream_ids = collect_downstream(failed_task.id, dependents)
 
         async with async_session() as db:
             if len(replacement_specs) == 1:
@@ -462,19 +381,6 @@ async def _attempt_recovery(
             await db.commit()
 
     return recovered_any
-
-
-def _collect_downstream(task_id: str, dependents: dict[str, list[str]]) -> set[str]:
-    """BFS to collect all transitively downstream task IDs."""
-    visited: set[str] = set()
-    queue = list(dependents.get(task_id, []))
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-        queue.extend(dependents.get(current, []))
-    return visited
 
 
 async def _transform_to_acquisition(

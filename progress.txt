@@ -481,6 +481,37 @@
   - BFS + reverse order handles recursive sub-action deletion safely
 ---
 
+## 2026-03-01 - US-015
+- Added debounced search input to sidebar (300ms debounce via custom `useDebounce` hook)
+- Search input with clear button, search icon, clears pagination on input change
+- Accumulated pagination: actions from multiple pages stored in `allActions` state, appended on "Load more"
+- "Load more" button appears when `next_cursor` is present in API response
+- Search resets pagination and accumulated actions
+- Loading skeleton shows only during fetch, "No matching actions" message when search has no results
+- Typecheck passes
+- Files changed: `frontend/src/components/app-sidebar.tsx`
+- **Learnings for future iterations:**
+  - For cursor-based pagination with accumulation, track cursors in an array and accumulate results in a separate state
+  - Use `useEffect` to detect search changes vs cursor changes for different accumulation behavior
+  - `useDebounce` is a simple custom hook — no need for external debounce library
+  - The `isFetching` flag from React Query helps show loading state during pagination fetches (vs `isLoading` which is only for initial load)
+---
+
+## 2026-03-01 - US-014
+- Fixed N+1 query in `list_actions`: replaced per-action `SELECT COUNT(*)` with single query using `outerjoin(Task)` + `group_by(Action.id)`
+- Added `search` (case-insensitive LIKE on title/root_prompt) and `cursor` (ISO timestamp) query params
+- Cursor pagination: fetches `limit+1` rows, returns `next_cursor` from last row's `updated_at` if more exist
+- New `PaginatedActionsResponse` schema: `{ actions: [...], next_cursor: str | null }`
+- Frontend: updated `listActions()` to accept params and return `PaginatedActions`, updated `useActions` hook with queryKey including search/cursor
+- Updated `app-sidebar.tsx` to use `data?.actions` instead of `data` directly
+- Files changed: `backend/app/routers/actions.py`, `backend/app/schemas/action.py`, `frontend/src/types/index.ts`, `frontend/src/lib/api/actions.ts`, `frontend/src/hooks/use-actions.ts`, `frontend/src/components/app-sidebar.tsx`
+- **Learnings for future iterations:**
+  - SQLAlchemy `select(Model, func.count(Related.id)).outerjoin(Related).group_by(Model.id)` returns tuples `(model_instance, count)` — use `result.all()` not `scalars().all()`
+  - Cursor pagination pattern: fetch `limit+1`, slice to `limit`, use last row's sort column as `next_cursor`
+  - When changing API response shape (array → object), update all frontend consumers: API function, hook, and components
+  - `ilike` for case-insensitive LIKE in SQLAlchemy (works on SQLite too)
+---
+
 ## 2026-03-01 - US-013
 - Added `deleteAction(id)` API function to `frontend/src/lib/api/actions.ts`
 - Added `useDeleteAction()` React Query hook to `frontend/src/hooks/use-actions.ts` with actions query invalidation
@@ -495,4 +526,19 @@
   - `group-hover:opacity-100` + `opacity-0` pattern for revealing action buttons on hover
   - Confirmation dialogs reuse the existing `Dialog` component (no AlertDialog needed)
   - `useDeleteAction` only invalidates the `["actions"]` list query; individual action query doesn't need invalidation since the page navigates away
+---
+
+## 2026-03-01 - US-016
+- Extracted DAG scheduling logic from executor.py into new `backend/app/services/dag_scheduler.py`
+- Three functions extracted: `invalidate_downstream`, `run_dag_pass`, `collect_downstream`
+- `run_dag_pass` accepts a `task_runner` callback to avoid circular imports with executor.py
+- executor.py imports from dag_scheduler and passes `_run_task` as the callback
+- Updated `backend/app/routers/tasks.py` to import `invalidate_downstream` from `dag_scheduler` instead of `executor`
+- No behavior change — pure refactor
+- Files changed: `backend/app/services/dag_scheduler.py` (new), `backend/app/services/executor.py`, `backend/app/routers/tasks.py`
+- **Learnings for future iterations:**
+  - Use callback parameters to break circular import dependencies between modules
+  - `Callable[..., Awaitable[None]]` type from `collections.abc` for async callback type hints
+  - When extracting functions that call back into the source module, pass them as parameters rather than importing
+  - The executor lost ~100 lines from this extraction; functions that don't need executor internals are good extraction candidates
 ---

@@ -79,7 +79,7 @@ async def update_task(
     body: TaskUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.executor import invalidate_downstream
+    from app.services.dag_scheduler import invalidate_downstream
 
     result = await db.execute(
         select(Task).where(Task.id == task_id, Task.action_id == action_id)
