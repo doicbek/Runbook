@@ -66,6 +66,7 @@ async def publish_action_started(action_id: str) -> None:
 
 async def publish_action_completed(action_id: str) -> None:
     await event_bus.publish(action_id, "action.completed", {"action_id": action_id})
+    event_bus.clear_history(action_id)
 
 
 async def publish_action_failed(action_id: str, reason: str) -> None:
@@ -73,6 +74,7 @@ async def publish_action_failed(action_id: str, reason: str) -> None:
         "action_id": action_id,
         "reason": reason,
     })
+    event_bus.clear_history(action_id)
 
 
 async def publish_action_replanning(action_id: str, attempt: int) -> None:

@@ -230,7 +230,7 @@ async def delete_action(action_id: str, db: AsyncSession = Depends(get_db)):
         )
         queue.extend(child_result.scalars().all())
 
-    # Cancel running executors for all actions being deleted
+    # Cancel running executors and clear event history for all actions being deleted
     for aid in action_ids_to_delete:
         existing = _running_executors.get(aid)
         if existing and not existing.done():
@@ -239,6 +239,7 @@ async def delete_action(action_id: str, db: AsyncSession = Depends(get_db)):
                 await existing
             except (asyncio.CancelledError, Exception):
                 pass
+        event_bus.clear_history(aid)
 
     # Collect artifact storage paths for file cleanup
     artifact_result = await db.execute(
