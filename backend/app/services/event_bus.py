@@ -6,6 +6,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+QUEUE_MAX_SIZE = 500
+QUEUE_HIGH_WATERMARK = 400
+
+
 class EventBus:
     """In-process asyncio.Queue-based pub/sub for SSE events."""
 
@@ -15,7 +19,7 @@ class EventBus:
         self._event_history: dict[str, deque] = {}
 
     def subscribe(self, action_id: str) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         self._subscribers[action_id].append(queue)
         return queue
 
@@ -43,7 +47,20 @@ class EventBus:
             try:
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
-                logger.warning(f"Queue full for action {action_id}, dropping event")
+                # Evict oldest event to make room
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                queue.put_nowait(payload)
+                logger.warning(
+                    f"Queue full for action {action_id}, evicted oldest event"
+                )
+            if queue.qsize() > QUEUE_HIGH_WATERMARK:
+                logger.warning(
+                    f"Queue depth {queue.qsize()}/{QUEUE_MAX_SIZE} for action {action_id} "
+                    f"exceeds 80%% capacity"
+                )
 
     def replay_from(self, action_id: str, last_event_id: int) -> list[dict[str, Any]]:
         """Return events with id > last_event_id from the ring buffer."""
@@ -51,6 +68,11 @@ class EventBus:
         if not history:
             return []
         return [event for event in history if event["id"] > last_event_id]
+
+    def queue_depth(self, action_id: str) -> dict[str, int]:
+        """Return current depth per subscriber queue for the given action."""
+        queues = self._subscribers.get(action_id, [])
+        return {f"subscriber_{i}": q.qsize() for i, q in enumerate(queues)}
 
     def clear_history(self, action_id: str):
         """Clear ring buffer and counter for an action."""
