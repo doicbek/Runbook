@@ -542,3 +542,32 @@
   - When extracting functions that call back into the source module, pass them as parameters rather than importing
   - The executor lost ~100 lines from this extraction; functions that don't need executor internals are good extraction candidates
 ---
+
+## 2026-03-01 - US-017
+- Extracted recovery/triage logic from executor.py into new `backend/app/services/recovery_manager.py`
+- Six functions extracted: `triage_failure`, `spawn_recovery_sub_action`, `attempt_recovery`, `full_replan`, `build_failure_history`, `transform_to_acquisition`
+- All function parameters are explicit — no imports from executor.py (avoids circular deps)
+- executor.py imports and calls these functions instead of its own private methods
+- Cleaned up unused imports in executor.py (`uuid`, `AsyncSession`, `collect_downstream`, `invalidate_downstream`)
+- executor.py reduced from ~1096 to 692 lines (~400 lines extracted)
+- No behavior change — pure refactor
+- Files changed: `backend/app/services/recovery_manager.py` (new), `backend/app/services/executor.py`
+- **Learnings for future iterations:**
+  - Recovery functions don't need any executor internals — they only use models, database, event_bus, and external services
+  - `Callable[..., Awaitable[None]] | None` type hint for optional async callbacks (used in `spawn_recovery_sub_action`)
+  - `transform_to_acquisition` is not currently called from executor.py but was extracted for completeness (dead code candidate)
+  - After extraction, always check for unused imports in the source module
+---
+
+## 2026-03-01 - US-018
+- Extracted event publishing helpers into `backend/app/services/event_publisher.py` (13 functions covering all SSE event types used by executor)
+- Extracted skill capture triggers into `backend/app/services/skill_capture.py` (3 functions: capture_success_skill, capture_failure_skill, capture_correction_skill)
+- Refactored executor.py to import and call these instead of inline `event_bus.publish` and `asyncio.create_task(generate_skill_...)` calls
+- Added `_create_agent` helper to reduce duplicated agent setup code in primary and retry paths
+- Files changed: `backend/app/services/event_publisher.py` (new), `backend/app/services/skill_capture.py` (new), `backend/app/services/executor.py` (refactored)
+- **Learnings for future iterations:**
+  - Event publisher functions should accept explicit parameters rather than raw dicts — makes call sites self-documenting
+  - Skill capture functions are synchronous wrappers around `asyncio.create_task` — they schedule fire-and-forget coroutines
+  - The executor recovery loop is inherently complex (~300 lines) and resists further extraction without creating tight coupling
+  - Agent creation + MCP config + stream callback setup was duplicated in primary and retry paths — extracting `_create_agent` helper eliminated that
+---
