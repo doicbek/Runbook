@@ -19,3 +19,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Per-agent-type timeout defaults (seconds)
+AGENT_TIMEOUTS: dict[str, int] = {
+    "code_execution": 600,
+    "coding": 900,
+    "sub_action": 1200,
+    "default": 300,
+}

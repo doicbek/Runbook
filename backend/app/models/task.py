@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, ForeignKey, String, Text, DateTime
+from sqlalchemy import Integer, JSON, ForeignKey, String, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -28,6 +28,7 @@ class Task(Base):
     sub_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     workspace_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     action: Mapped["Action"] = relationship("Action", back_populates="tasks")  # noqa: F821
     outputs: Mapped[list["TaskOutput"]] = relationship("TaskOutput", back_populates="task", cascade="all, delete-orphan")  # noqa: F821

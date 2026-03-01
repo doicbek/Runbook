@@ -42,6 +42,8 @@ async def init_db():
             "ALTER TABLE agent_skills ADD COLUMN recurrence_count INTEGER DEFAULT 1",
             "ALTER TABLE agent_skills ADD COLUMN first_seen DATETIME",
             "ALTER TABLE agent_skills ADD COLUMN last_seen DATETIME",
+            # Task timeout
+            "ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER",
         ]:
             try:
                 await conn.execute(text(stmt))
