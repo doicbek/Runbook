@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useRunAction, useBreadcrumbs, useDeleteAction } from "@/hooks/use-actions";
+import { useSaveAsTemplate } from "@/hooks/use-templates";
 import { useActionStore } from "@/stores/action-store";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { Action } from "@/types";
@@ -28,7 +29,9 @@ export function WorkspaceHeader({ action }: { action: Action }) {
   const router = useRouter();
   const runAction = useRunAction();
   const deleteAction = useDeleteAction();
+  const saveAsTemplate = useSaveAsTemplate();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [savedAsTemplate, setSavedAsTemplate] = useState(false);
   const [costPanelOpen, setCostPanelOpen] = useState(false);
   const sseStatus = useActionStore((s) => s.actionStatus);
   const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
@@ -139,6 +142,25 @@ export function WorkspaceHeader({ action }: { action: Action }) {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            {status === "completed" && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={saveAsTemplate.isPending || savedAsTemplate}
+                onClick={async () => {
+                  await saveAsTemplate.mutateAsync(action.id);
+                  setSavedAsTemplate(true);
+                }}
+                className="gap-1.5 text-xs"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M5 2v4h6V2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M5 10h6" strokeLinecap="round" />
+                </svg>
+                {savedAsTemplate ? "Saved" : saveAsTemplate.isPending ? "Saving..." : "Save as Template"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"

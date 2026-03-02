@@ -3,6 +3,7 @@ import {
   createTemplate,
   deleteTemplate,
   listTemplates,
+  saveAsTemplate,
   updateTemplate,
   useTemplateApi,
 } from "@/lib/api/templates";
@@ -56,6 +57,16 @@ export function useUseTemplate() {
     mutationFn: (id: string) => useTemplateApi(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["actions"] });
+    },
+  });
+}
+
+export function useSaveAsTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (actionId: string) => saveAsTemplate(actionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["templates"] });
     },
   });
 }
