@@ -621,3 +621,27 @@
   - `resetForAction` in action store must include any new fields to avoid stale state on action switch
   - The workspace header badge pattern: variant="secondary" + bg color classes for light/dark modes
 ---
+
+## 2026-03-01 - US-023
+- AgentMemory and AgentMemoryVersion models already existed in `backend/app/models/agent_memory_model.py`
+- Models already imported in `models/__init__.py` and `database.py` init_db
+- Verified typecheck and imports pass
+- Files changed: `backend/app/models/agent_memory_model.py` (already existed, committed), `backend/app/models/__init__.py`, `backend/app/database.py`
+- **Learnings for future iterations:**
+  - Some stories may already be partially or fully implemented from prior work — always check existing files before writing new code
+  - AgentMemoryVersion has a unique constraint on (memory_id, version)
+---
+
+## 2026-03-01 - US-024
+- Migrated agent_memory.py from flat file storage to DB-backed AgentMemory/AgentMemoryVersion tables
+- `load_memory(agent_type, db)` now reads from DB via async session
+- `save_memory(agent_type, content, db)` upserts AgentMemory row, creates AgentMemoryVersion snapshot, increments version
+- `generate_and_save_lesson` now takes db parameter
+- Added `seed_memory_from_files(db)` to migrate legacy .md files to DB on startup (called from init_db)
+- Updated executor.py callers to open async_session and pass db to load_memory and generate_and_save_lesson
+- Files changed: backend/app/services/agents/agent_memory.py, backend/app/database.py, backend/app/services/executor.py
+- **Learnings for future iterations:**
+  - agent_memory.py is under `services/agents/`, not `services/`
+  - Executor already uses `async_session()` context managers nearby — follow same pattern for new DB calls
+  - seed_memory_from_files goes at end of init_db after WAL mode is set
+---
