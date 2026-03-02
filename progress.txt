@@ -670,3 +670,13 @@
   - The PATCH /agent-memory/{agent_type} endpoint handles both create (upsert) and update, so no separate POST needed
   - Pattern for subsections on agent detail page: create a `function XxxSection({ agentType })` component, place between existing Card sections
 ---
+
+## 2026-03-01 - US-027
+- Added LLM_PRICING dict to config.py with per-1M-token input/output rates for all 20 models in MODEL_REGISTRY
+- Created LLMUsage model in backend/app/models/llm_usage.py (id, action_id, task_id, model, input_tokens, output_tokens, cost_usd, created_at)
+- Registered model in models/__init__.py and database.py init_db()
+- Files changed: backend/app/config.py, backend/app/models/llm_usage.py (new), backend/app/models/__init__.py, backend/app/database.py
+- **Learnings for future iterations:**
+  - LLM_PRICING keys match MODEL_REGISTRY keys (provider/model_id format)
+  - LLMUsage has nullable action_id and task_id to support tracking calls not tied to a specific task (e.g. utility calls)
+---
