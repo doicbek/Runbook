@@ -16,6 +16,7 @@ import {
   useModifyAgent,
 } from "@/hooks/use-agent-definitions";
 import { useSkills, useUpdateSkill } from "@/hooks/use-agent-skills";
+import { useAgentMemory, useUpdateAgentMemory } from "@/hooks/use-agent-memory";
 import { useAvailableModels } from "@/hooks/use-models";
 
 const REAL_BUILTINS = new Set([
@@ -201,6 +202,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
         {/* Skills */}
         <AgentSkillsSection agentType={agent.agent_type} />
 
+        {/* Memory */}
+        <AgentMemorySection agentType={agent.agent_type} />
+
         {/* AI Modify + Code */}
         <Card>
           <CardHeader className="pb-2">
@@ -368,6 +372,104 @@ const _catColors: Record<string, string> = {
   correction: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   best_practice: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
 };
+
+function AgentMemorySection({ agentType }: { agentType: string }) {
+  const { data: memory, isLoading, error } = useAgentMemory(agentType);
+  const updateMemory = useUpdateAgentMemory();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const is404 = error && (error as Error).message?.includes("404");
+
+  const handleEdit = () => {
+    setDraft(memory?.content ?? "");
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    await updateMemory.mutateAsync({ agentType, content: draft });
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditing(false);
+    setDraft("");
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">Memory</h2>
+          {memory && !editing && (
+            <Badge variant="outline" className="text-[10px]">v{memory.version}</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+
+        {is404 && !editing && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              No memory yet. Memory is auto-generated from task failures, or you can create it manually.
+            </p>
+            <Button variant="outline" size="sm" className="text-xs h-7" onClick={handleEdit}>
+              Create Memory
+            </Button>
+          </div>
+        )}
+
+        {memory && !editing && (
+          <div className="space-y-2">
+            <pre className="text-xs whitespace-pre-wrap bg-muted rounded p-3 max-h-64 overflow-y-auto font-mono">
+              {memory.content || "(empty)"}
+            </pre>
+            <Button variant="outline" size="sm" className="text-xs h-7" onClick={handleEdit}>
+              Edit Memory
+            </Button>
+          </div>
+        )}
+
+        {editing && (
+          <div className="space-y-2">
+            <Textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={10}
+              className="font-mono text-xs"
+              placeholder="Agent memory content (markdown)..."
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                className="text-xs h-7"
+                onClick={handleSave}
+                disabled={updateMemory.isPending}
+              >
+                {updateMemory.isPending ? "Saving..." : "Save"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-7"
+                onClick={handleCancel}
+                disabled={updateMemory.isPending}
+              >
+                Cancel
+              </Button>
+              {updateMemory.isError && (
+                <span className="text-xs text-destructive">
+                  {(updateMemory.error as Error)?.message}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function AgentSkillsSection({ agentType }: { agentType: string }) {
   const { data: skills, isLoading } = useSkills(agentType);
