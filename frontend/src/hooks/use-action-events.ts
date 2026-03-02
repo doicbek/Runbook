@@ -19,7 +19,7 @@ export function useActionEvents(actionId: string, enabled = true) {
       connectionRef.current = null;
     }
 
-    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut, setSSEConnected } =
+    const { setTaskOverride, setActionStatus, setRecoveryAttempt, setReplanning, setFailureReason, clearTaskState, appendTaskLog, setCodeExecution, addIteration, updateCurrentIteration, setRetryStatus, appendTaskStreamingText, setTaskTimedOut, setSSEConnected, updateCost } =
       useActionStore.getState();
     const queryClient = queryClientRef.current;
 
@@ -257,6 +257,16 @@ export function useActionEvents(actionId: string, enabled = true) {
               level: "info",
               message: `User guidance: ${(data.guidance as string) || "resumed"}`,
             });
+            break;
+
+          // --- Cost tracking ---
+          case "cost.update":
+            updateCost(
+              data.total_cost_usd as number,
+              (data.task_id as string) || null,
+              (data.model as string) || null,
+              data.cost_usd as number
+            );
             break;
 
           // --- Streaming LLM output ---

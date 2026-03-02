@@ -29,11 +29,15 @@ export function WorkspaceHeader({ action }: { action: Action }) {
   const runAction = useRunAction();
   const deleteAction = useDeleteAction();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [costPanelOpen, setCostPanelOpen] = useState(false);
   const sseStatus = useActionStore((s) => s.actionStatus);
   const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
   const isReplanning = useActionStore((s) => s.isReplanning);
   const failureReason = useActionStore((s) => s.failureReason);
   const sseConnected = useActionStore((s) => s.sseConnected);
+  const actionCost = useActionStore((s) => s.actionCost);
+  const costByTask = useActionStore((s) => s.costByTask);
+  const costByModel = useActionStore((s) => s.costByModel);
   const status = sseStatus || action.status;
   const hasPendingTasks = action.tasks.some((t) => t.status === "pending");
   const isRunning = status === "running";
@@ -121,6 +125,17 @@ export function WorkspaceHeader({ action }: { action: Action }) {
                 Reconnecting...
               </Badge>
             )}
+            {actionCost > 0 && (
+              <button
+                onClick={() => setCostPanelOpen((v) => !v)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/70 transition-colors cursor-pointer border-0"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M6 1v10M3.5 3.5C3.5 2.67 4.62 2 6 2s2.5.67 2.5 1.5S7.38 5 6 5 3.5 5.67 3.5 6.5 4.62 8 6 8s2.5-.67 2.5-1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                ${actionCost.toFixed(2)}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
@@ -150,6 +165,51 @@ export function WorkspaceHeader({ action }: { action: Action }) {
         <p className="text-sm text-muted-foreground mt-2 max-w-2xl">
           {action.root_prompt}
         </p>
+        {costPanelOpen && actionCost > 0 && (
+          <div className="mt-3 rounded-md border bg-muted/30 p-3 max-w-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">Cost Breakdown</span>
+              <span className="text-sm font-semibold">${actionCost.toFixed(2)}</span>
+            </div>
+            {Object.keys(costByModel).length > 0 && (
+              <div className="mb-2">
+                <span className="text-[10px] font-medium uppercase text-muted-foreground tracking-wider">By Model</span>
+                <div className="mt-1 space-y-0.5">
+                  {Object.entries(costByModel)
+                    .sort(([, a], [, b]) => b.cost_usd - a.cost_usd)
+                    .map(([model, info]) => (
+                      <div key={model} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground truncate mr-2">{model}</span>
+                        <span className="font-mono tabular-nums">
+                          ${info.cost_usd.toFixed(2)} <span className="text-muted-foreground">({info.calls} calls)</span>
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+            {Object.keys(costByTask).length > 0 && (
+              <div>
+                <span className="text-[10px] font-medium uppercase text-muted-foreground tracking-wider">By Task</span>
+                <div className="mt-1 space-y-0.5">
+                  {Object.entries(costByTask)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([taskId, cost]) => {
+                      const task = action.tasks.find((t) => t.id === taskId);
+                      return (
+                        <div key={taskId} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground truncate mr-2">
+                            {task ? task.prompt.slice(0, 50) + (task.prompt.length > 50 ? "..." : "") : taskId.slice(0, 8)}
+                          </span>
+                          <span className="font-mono tabular-nums">${cost.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {status === "failed" && failureReason && (
           <div className="mt-3 flex items-start gap-2 rounded-md bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/30 px-3 py-2">
             <svg className="w-4 h-4 text-red-500 shrink-0 mt-0.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">

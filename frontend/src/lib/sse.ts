@@ -48,6 +48,7 @@ export function createSSEConnection(
     "task.paused",
     "task.resumed",
     "task.user_guidance",
+    "cost.update",
     "ping",
   ];
 

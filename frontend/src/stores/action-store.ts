@@ -30,6 +30,9 @@ interface ActionStore {
   taskTimedOut: Record<string, boolean>;
   failureReason: string | null;
   sseConnected: boolean;
+  actionCost: number;  // total_cost_usd accumulated via SSE
+  costByTask: Record<string, number>;  // task_id -> cost_usd
+  costByModel: Record<string, { cost_usd: number; calls: number }>;
 
   setTaskOverride: (taskId: string, override: Partial<Task>) => void;
   setActionStatus: (status: string) => void;
@@ -47,6 +50,7 @@ interface ActionStore {
   setRetryStatus: (taskId: string, status: RetryStatus | null) => void;
   appendTaskStreamingText: (taskId: string, chunk: string) => void;
   setTaskTimedOut: (taskId: string, timedOut: boolean) => void;
+  updateCost: (totalCost: number, taskId: string | null, model: string | null, costUsd: number) => void;
 }
 
 const defaultCodeState: CodeExecutionState = {
@@ -71,6 +75,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
   taskTimedOut: {},
   failureReason: null,
   sseConnected: true,
+  actionCost: 0,
+  costByTask: {},
+  costByModel: {},
 
   setTaskOverride: (taskId, override) =>
     set((state) => ({
@@ -96,7 +103,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     set({ sseConnected: connected }),
 
   clearTaskState: () =>
-    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, taskTimedOut: {}, failureReason: null }),
+    set({ taskOverrides: {}, taskLogs: {}, codeExecutions: {}, taskIterations: {}, currentIteration: {}, retryStatus: {}, taskStreamingText: {}, taskTimedOut: {}, failureReason: null, actionCost: 0, costByTask: {}, costByModel: {} }),
 
   appendTaskLog: (taskId, log) =>
     set((state) => ({
@@ -125,6 +132,9 @@ export const useActionStore = create<ActionStore>((set, get) => ({
       taskTimedOut: {},
       failureReason: null,
       sseConnected: true,
+      actionCost: 0,
+      costByTask: {},
+      costByModel: {},
     }),
 
   resetLogs: (taskId) =>
@@ -191,4 +201,21 @@ export const useActionStore = create<ActionStore>((set, get) => ({
         [taskId]: timedOut,
       },
     })),
+
+  updateCost: (totalCost, taskId, model, costUsd) =>
+    set((state) => {
+      const costByTask = taskId
+        ? { ...state.costByTask, [taskId]: (state.costByTask[taskId] || 0) + costUsd }
+        : state.costByTask;
+      const costByModel = model
+        ? {
+            ...state.costByModel,
+            [model]: {
+              cost_usd: (state.costByModel[model]?.cost_usd || 0) + costUsd,
+              calls: (state.costByModel[model]?.calls || 0) + 1,
+            },
+          }
+        : state.costByModel;
+      return { actionCost: totalCost, costByTask, costByModel };
+    }),
 }));
