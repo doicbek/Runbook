@@ -753,3 +753,15 @@
   - Tag filtering uses dynamic extraction from template data (useMemo to collect unique tags)
   - useUseTemplate hook invalidates ["actions"] query key since it creates a new action
 ---
+
+## 2026-03-02 - US-033
+- Added Save as Template button to workspace header (visible only on completed actions)
+- Added useSaveAsTemplate hook in use-templates.ts wrapping saveAsTemplate API
+- Rewrote create-action-dialog.tsx with tab switcher: "New Action" (original form) and "From Template" (sorted by usage_count desc)
+- Clicking a template creates action via useTemplate mutation and navigates to workspace
+- Files changed: `frontend/src/components/workspace/workspace-header.tsx`, `frontend/src/components/create-action-dialog.tsx`, `frontend/src/hooks/use-templates.ts`
+- **Learnings for future iterations:**
+  - No Tabs UI component in shadcn install; use simple button-based tab switcher with bg-muted container and shadow-sm active state
+  - saveAsTemplate API client already existed at `/templates/from-action/{actionId}` — just needed the React Query hook wrapper
+  - Dialog reset pattern: reset tab state in onOpenChange callback when dialog closes
+---
