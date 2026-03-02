@@ -308,7 +308,8 @@ async def _run_task(
 
     # Inject past lessons into the prompt
     from app.services.agents.agent_memory import load_memory
-    memory = load_memory(agent_type)
+    async with async_session() as mem_db:
+        memory = await load_memory(agent_type, mem_db)
     effective_prompt = prompt
     if memory:
         effective_prompt = (
@@ -368,7 +369,8 @@ async def _run_task(
 
         try:
             from app.services.agents.agent_memory import generate_and_save_lesson
-            await generate_and_save_lesson(agent_type, prompt, first_error)
+            async with async_session() as mem_db:
+                await generate_and_save_lesson(agent_type, prompt, first_error, mem_db)
         except Exception:
             pass
 

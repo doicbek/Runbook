@@ -56,6 +56,11 @@ async def init_db():
         await conn.exec_driver_sql("PRAGMA busy_timeout=5000")
         await conn.commit()
 
+    # Seed agent memory from legacy markdown files if DB is empty
+    from app.services.agents.agent_memory import seed_memory_from_files
+    async with async_session() as session:
+        await seed_memory_from_files(session)
+
 
 async def get_db() -> AsyncSession:  # type: ignore[misc]
     async with async_session() as session:
