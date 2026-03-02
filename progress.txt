@@ -703,3 +703,18 @@
   - By-agent-type breakdown joins LLMUsage to Task on task_id to get agent_type
   - Time-range filtering uses datetime arithmetic with timedelta
 ---
+
+## 2026-03-01 - US-030
+- Implemented real-time cost display in the workspace header
+- Registered `cost.update` SSE event type in `sse.ts`
+- Added `actionCost`, `costByTask`, `costByModel` fields to Zustand action store with `updateCost` mutation
+- Handled `cost.update` event in `use-action-events.ts` to accumulate costs via SSE
+- Added cost counter badge (green, `$X.XX` format) next to status badges in workspace header
+- Clicking cost counter toggles expandable panel with breakdown by model (with call count) and by task (with prompt preview)
+- Cost display formatted to 2 decimal places with $ prefix
+- Files changed: `frontend/src/lib/sse.ts`, `frontend/src/stores/action-store.ts`, `frontend/src/hooks/use-action-events.ts`, `frontend/src/components/workspace/workspace-header.tsx`
+- **Learnings for future iterations:**
+  - The `cost.update` SSE event payload from backend includes `total_cost_usd`, `task_id`, `model`, and `cost_usd` (per-call cost)
+  - Zustand store accumulates per-task and per-model costs incrementally from SSE events — no need to poll API
+  - Use `tabular-nums` class for font-variant-numeric alignment in cost tables
+---
