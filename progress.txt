@@ -656,3 +656,17 @@
   - Pydantic response models defined inline in router file (no separate schema file needed for simple CRUD)
   - Version listing requires first looking up the AgentMemory record to get memory_id, then querying AgentMemoryVersion
 ---
+
+## 2026-03-01 - US-026
+- Added agent memory UI section to agent detail page `/agents/:id`
+- New files: `frontend/src/lib/api/agent-memory.ts` (API client), `frontend/src/hooks/use-agent-memory.ts` (React Query hooks)
+- `AgentMemorySection` component added between Skills and Code sections
+- Shows read-only content with version badge when memory exists, "No memory yet" placeholder when 404
+- Edit Memory button opens inline textarea editor with Save/Cancel
+- Create Memory button available when no memory exists (PATCH endpoint handles upsert)
+- Files changed: `frontend/src/app/agents/[id]/page.tsx`, `frontend/src/lib/api/agent-memory.ts` (new), `frontend/src/hooks/use-agent-memory.ts` (new)
+- **Learnings for future iterations:**
+  - 404 errors from the API can be detected via `error.message.includes("404")` with `retry: false` on useQuery
+  - The PATCH /agent-memory/{agent_type} endpoint handles both create (upsert) and update, so no separate POST needed
+  - Pattern for subsections on agent detail page: create a `function XxxSection({ agentType })` component, place between existing Card sections
+---
