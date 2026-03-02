@@ -182,6 +182,16 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             </svg>
           </Link>
           <Link
+            href="/schedules"
+            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            title="Schedules"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="8" cy="8" r="6" />
+              <path d="M8 4.5V8l2.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+          <Link
             href="/planner"
             className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
             title="Planner"
@@ -383,6 +393,20 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             <path d="M5 5h6M5 8h4M5 11h5" strokeLinecap="round" />
           </svg>
           Templates
+        </Link>
+        <Link
+          href="/schedules"
+          className={`flex items-center gap-2 px-2 py-1 text-[11px] rounded transition-colors ${
+            pathname === "/schedules"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 4.5V8l2.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Schedules
         </Link>
         <Link
           href="/planner"

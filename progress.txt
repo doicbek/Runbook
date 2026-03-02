@@ -798,3 +798,20 @@
   - `croniter(expression)` without a second arg validates the expression; raises ValueError on invalid
   - Manual run tracking uses the same `_track_manual_run_completion` pattern as scheduler service
 ---
+
+## 2026-03-02 - US-036
+- Implemented /schedules frontend page with full CRUD for scheduled actions
+- Added ActionSchedule and ActionScheduleDetail type interfaces
+- Created API client (frontend/src/lib/api/schedules.ts): listSchedules, getSchedule, createSchedule, updateSchedule, deleteSchedule, runScheduleNow
+- Created React Query hooks (frontend/src/hooks/use-schedules.ts): useSchedules, useCreateSchedule, useUpdateSchedule, useDeleteSchedule, useRunScheduleNow
+- Built schedules page with: table-style schedule list, create form with cron presets and expression input, inline edit form, delete confirmation, Run Now button, active/inactive toggle switch
+- Installed cronstrue for human-readable cron expression display
+- Failure warning badges: orange for 1-2 consecutive failures, red for 3+
+- Added Schedules nav link (clock icon) to sidebar in both collapsed and expanded views
+- Files changed: frontend/src/types/index.ts, frontend/src/lib/api/schedules.ts (new), frontend/src/hooks/use-schedules.ts (new), frontend/src/app/schedules/page.tsx (new), frontend/src/components/app-sidebar.tsx, frontend/package.json
+- **Learnings for future iterations:**
+  - cronstrue package converts cron expressions to human-readable strings; use try/catch since invalid expressions throw
+  - Follow templates page pattern: useState for showCreate/editingId/deleteConfirmId, inline forms swap with cards
+  - Sidebar nav links need updating in TWO places: collapsed view (icon-only) and expanded footer (icon + text)
+  - React Query hooks follow simple pattern: useQuery for reads, useMutation with queryClient.invalidateQueries for writes
+---

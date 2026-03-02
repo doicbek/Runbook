@@ -262,6 +262,30 @@ export interface ActionTemplate {
   updated_at: string;
 }
 
+export interface ActionSchedule {
+  id: string;
+  title: string;
+  root_prompt: string;
+  cron_expression: string;
+  is_active: boolean;
+  last_run_at: string | null;
+  next_run_at: string;
+  run_count: number;
+  consecutive_failures: number;
+  template_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionScheduleDetail extends ActionSchedule {
+  recent_actions: Array<{
+    id: string;
+    title: string;
+    status: string;
+    created_at: string | null;
+  }>;
+}
+
 export interface AgentIteration {
   id: string;
   task_id: string;
