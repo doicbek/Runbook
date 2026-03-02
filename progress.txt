@@ -645,3 +645,14 @@
   - Executor already uses `async_session()` context managers nearby — follow same pattern for new DB calls
   - seed_memory_from_files goes at end of init_db after WAL mode is set
 ---
+
+## 2026-03-01 - US-025
+- Implemented agent memory CRUD API router at `backend/app/routers/agent_memory.py`
+- Endpoints: GET /agent-memory (list with truncated content), GET /agent-memory/{agent_type} (full detail), PATCH /agent-memory/{agent_type} (update + version snapshot), GET /agent-memory/{agent_type}/versions (version history), GET /agent-memory/{agent_type}/versions/{version} (specific version)
+- Registered router in `backend/app/main.py`
+- Files changed: `backend/app/routers/agent_memory.py` (new), `backend/app/main.py`
+- **Learnings for future iterations:**
+  - PATCH endpoint for agent memory reuses same upsert + version snapshot logic from `save_memory()` in agent_memory.py service
+  - Pydantic response models defined inline in router file (no separate schema file needed for simple CRUD)
+  - Version listing requires first looking up the AgentMemory record to get memory_id, then querying AgentMemoryVersion
+---
