@@ -1,10 +1,65 @@
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
-from app.config import settings
+from app.config import LLM_PRICING, settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_llm_usage(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    action_id: str | None = None,
+    task_id: str | None = None,
+) -> None:
+    """Record LLM usage in the database and optionally publish SSE cost event."""
+    pricing = LLM_PRICING.get(model, {"input": 0.0, "output": 0.0})
+    cost_usd = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+    try:
+        from app.database import async_session
+        from app.models.llm_usage import LLMUsage
+
+        async with async_session() as session:
+            usage = LLMUsage(
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd,
+                action_id=action_id,
+                task_id=task_id,
+            )
+            session.add(usage)
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Failed to record LLM usage: {e}")
+
+    if action_id:
+        try:
+            from sqlalchemy import func, select
+
+            from app.database import async_session
+            from app.models.llm_usage import LLMUsage
+            from app.services.event_bus import event_bus
+
+            async with async_session() as session:
+                result = await session.execute(
+                    select(func.sum(LLMUsage.cost_usd)).where(LLMUsage.action_id == action_id)
+                )
+                total_cost = result.scalar() or 0.0
+
+            await event_bus.publish(action_id, "cost.update", {
+                "action_id": action_id,
+                "total_cost_usd": round(total_cost, 6),
+                "task_id": task_id,
+                "model": model,
+                "cost_usd": round(cost_usd, 6),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to publish cost update: {e}")
 
 
 @dataclass
@@ -223,10 +278,16 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
         model: Model name in "provider/model_id" format (e.g. "openai/gpt-4o")
         messages: List of message dicts with "role" and "content" keys
         **kwargs: Additional kwargs passed to the provider (max_tokens, temperature, etc.)
+            Special kwargs (not passed to provider):
+            - action_id: Optional action ID for cost tracking
+            - task_id: Optional task ID for cost tracking
 
     Returns:
         Plain text content from the model response.
     """
+    action_id = kwargs.pop("action_id", None)
+    task_id = kwargs.pop("task_id", None)
+
     config = MODEL_REGISTRY.get(model)
     if not config:
         raise ValueError(f"Unknown model: {model}. Available: {list(MODEL_REGISTRY.keys())}")
@@ -238,9 +299,20 @@ async def chat_completion(model: str, messages: list[dict], **kwargs) -> str:
     logger.info(f"Using model: {model}")
 
     if config.provider == "anthropic":
-        return await _anthropic_completion(config, api_key, messages, **kwargs)
+        text, usage = await _anthropic_completion(config, api_key, messages, **kwargs)
     else:
-        return await _openai_compatible_completion(config, api_key, messages, **kwargs)
+        text, usage = await _openai_compatible_completion(config, api_key, messages, **kwargs)
+
+    if usage["input_tokens"] > 0 or usage["output_tokens"] > 0:
+        asyncio.create_task(_record_llm_usage(
+            model=model,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            action_id=action_id,
+            task_id=task_id,
+        ))
+
+    return text
 
 
 async def chat_completion_stream(
@@ -254,10 +326,16 @@ async def chat_completion_stream(
         model: Model name in "provider/model_id" format
         messages: List of message dicts with "role" and "content" keys
         **kwargs: Additional kwargs passed to the provider
+            Special kwargs (not passed to provider):
+            - action_id: Optional action ID for cost tracking
+            - task_id: Optional task ID for cost tracking
 
     Yields:
         Text chunks from the model response.
     """
+    action_id = kwargs.pop("action_id", None)
+    task_id = kwargs.pop("task_id", None)
+
     config = MODEL_REGISTRY.get(model)
     if not config:
         raise ValueError(f"Unknown model: {model}. Available: {list(MODEL_REGISTRY.keys())}")
@@ -268,12 +346,23 @@ async def chat_completion_stream(
 
     logger.info(f"Streaming model: {model}")
 
+    usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+
     if config.provider == "anthropic":
-        async for chunk in _anthropic_stream(config, api_key, messages, **kwargs):
+        async for chunk in _anthropic_stream(config, api_key, messages, usage, **kwargs):
             yield chunk
     else:
-        async for chunk in _openai_compatible_stream(config, api_key, messages, **kwargs):
+        async for chunk in _openai_compatible_stream(config, api_key, messages, usage, **kwargs):
             yield chunk
+
+    if usage["input_tokens"] > 0 or usage["output_tokens"] > 0:
+        asyncio.create_task(_record_llm_usage(
+            model=model,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            action_id=action_id,
+            task_id=task_id,
+        ))
 
 
 async def chat_completion_with_tool(
@@ -489,7 +578,7 @@ _MAX_COMPLETION_TOKENS_MODELS = {
 
 async def _openai_compatible_completion(
     config: ModelConfig, api_key: str, messages: list[dict], **kwargs
-) -> str:
+) -> tuple[str, dict[str, int]]:
     """Handle OpenAI, DeepSeek, and Google Gemini (all OpenAI-compatible)."""
     from openai import AsyncOpenAI
 
@@ -510,12 +599,17 @@ async def _openai_compatible_completion(
         messages=messages,
         **kwargs,
     )
-    return response.choices[0].message.content or ""
+    text = response.choices[0].message.content or ""
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    if response.usage:
+        usage["input_tokens"] = response.usage.prompt_tokens or 0
+        usage["output_tokens"] = response.usage.completion_tokens or 0
+    return text, usage
 
 
 async def _anthropic_completion(
     config: ModelConfig, api_key: str, messages: list[dict], **kwargs
-) -> str:
+) -> tuple[str, dict[str, int]]:
     """Handle Anthropic models (different API format)."""
     from anthropic import AsyncAnthropic
 
@@ -546,11 +640,16 @@ async def _anthropic_completion(
         anthropic_kwargs["temperature"] = kwargs.pop("temperature")
 
     response = await client.messages.create(**anthropic_kwargs)
-    return response.content[0].text if response.content else ""
+    text = response.content[0].text if response.content else ""
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+    return text, usage
 
 
 async def _anthropic_stream(
-    config: ModelConfig, api_key: str, messages: list[dict], **kwargs
+    config: ModelConfig, api_key: str, messages: list[dict], usage_out: dict[str, int], **kwargs
 ) -> AsyncGenerator[str, None]:
     """Stream text deltas from Anthropic models."""
     from anthropic import AsyncAnthropic
@@ -580,10 +679,13 @@ async def _anthropic_stream(
     async with client.messages.stream(**anthropic_kwargs) as stream:
         async for text in stream.text_stream:
             yield text
+        final = await stream.get_final_message()
+        usage_out["input_tokens"] = final.usage.input_tokens
+        usage_out["output_tokens"] = final.usage.output_tokens
 
 
 async def _openai_compatible_stream(
-    config: ModelConfig, api_key: str, messages: list[dict], **kwargs
+    config: ModelConfig, api_key: str, messages: list[dict], usage_out: dict[str, int], **kwargs
 ) -> AsyncGenerator[str, None]:
     """Stream text deltas from OpenAI-compatible providers."""
     from openai import AsyncOpenAI
@@ -602,8 +704,12 @@ async def _openai_compatible_stream(
         model=config.model_id,
         messages=messages,
         stream=True,
+        stream_options={"include_usage": True},
         **kwargs,
     )
     async for chunk in stream:
         if chunk.choices and chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
+        if chunk.usage:
+            usage_out["input_tokens"] = chunk.usage.prompt_tokens or 0
+            usage_out["output_tokens"] = chunk.usage.completion_tokens or 0
