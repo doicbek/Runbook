@@ -784,3 +784,17 @@
   - Use `async_session()` context manager for DB access in background services (not `get_db` which is a FastAPI dependency)
   - `pip install pkg>=ver` on WSL can create spurious files — check for `=version` file in working dir
 ---
+
+## 2026-03-02 - US-035
+- Implemented schedules CRUD router in `backend/app/routers/schedules.py`
+- Endpoints: GET /schedules (list), GET /schedules/{id} (detail with recent actions), POST /schedules (create with cron validation), PATCH /schedules/{id} (update with next_run_at recompute on cron change), DELETE /schedules/{id}, POST /schedules/{id}/run-now (immediate trigger)
+- Cron expression validated via `croniter()` on create and update, returns 400 on invalid
+- `run-now` creates action using same pattern as scheduler service, tracks completion for consecutive_failures
+- Detail endpoint returns last 5 actions matching the schedule title as recent_actions
+- Registered router in `main.py`
+- Files changed: `backend/app/routers/schedules.py` (new), `backend/app/main.py`
+- **Learnings for future iterations:**
+  - Follow templates.py pattern for CRUD routers: Pydantic schemas inline, helper to convert model to response, validate before DB write
+  - `croniter(expression)` without a second arg validates the expression; raises ValueError on invalid
+  - Manual run tracking uses the same `_track_manual_run_completion` pattern as scheduler service
+---
