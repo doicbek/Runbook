@@ -17,6 +17,7 @@ import {
 } from "@/hooks/use-agent-definitions";
 import { useSkills, useUpdateSkill } from "@/hooks/use-agent-skills";
 import { useAgentMemory, useUpdateAgentMemory } from "@/hooks/use-agent-memory";
+import { useAgentToolAnalytics } from "@/hooks/use-tool-analytics";
 import { useAvailableModels } from "@/hooks/use-models";
 
 const REAL_BUILTINS = new Set([
@@ -204,6 +205,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
         {/* Memory */}
         <AgentMemorySection agentType={agent.agent_type} />
+
+        {/* Tool Usage */}
+        <ToolUsageSection agentType={agent.agent_type} />
 
         {/* AI Modify + Code */}
         <Card>
@@ -464,6 +468,80 @@ function AgentMemorySection({ agentType }: { agentType: string }) {
                 </span>
               )}
             </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ToolUsageSection({ agentType }: { agentType: string }) {
+  const [days, setDays] = useState<number | undefined>(undefined);
+  const { data: tools, isLoading } = useAgentToolAnalytics(agentType, days);
+
+  const rateColor = (rate: number) => {
+    if (rate < 50) return "text-red-600 dark:text-red-400";
+    if (rate < 80) return "text-orange-600 dark:text-orange-400";
+    return "text-foreground";
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">Tool Usage</h2>
+          <div className="flex items-center gap-1">
+            {([
+              { label: "7d", value: 7 },
+              { label: "30d", value: 30 },
+              { label: "All", value: undefined },
+            ] as const).map((opt) => (
+              <button
+                key={opt.label}
+                onClick={() => setDays(opt.value)}
+                className={`text-[10px] px-2 py-0.5 rounded ${
+                  days === opt.value
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {tools && tools.length === 0 && !isLoading && (
+          <p className="text-xs text-muted-foreground">
+            No tool usage recorded yet for this agent type.
+          </p>
+        )}
+        {tools && tools.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="text-left py-1.5 pr-4 font-medium">Tool</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Calls</th>
+                  <th className="text-right py-1.5 px-2 font-medium">Success</th>
+                  <th className="text-right py-1.5 pl-2 font-medium">Avg (ms)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tools.map((t) => (
+                  <tr key={t.tool_name} className="border-b border-muted/50 last:border-0">
+                    <td className="py-1.5 pr-4 font-mono">{t.tool_name}</td>
+                    <td className="text-right py-1.5 px-2 tabular-nums">{t.total_calls}</td>
+                    <td className={`text-right py-1.5 px-2 tabular-nums ${rateColor(t.success_rate)}`}>
+                      {t.success_rate.toFixed(1)}%
+                    </td>
+                    <td className="text-right py-1.5 pl-2 tabular-nums">{t.avg_duration_ms}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </CardContent>

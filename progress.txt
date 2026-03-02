@@ -815,3 +815,35 @@
   - Sidebar nav links need updating in TWO places: collapsed view (icon-only) and expanded footer (icon + text)
   - React Query hooks follow simple pattern: useQuery for reads, useMutation with queryClient.invalidateQueries for writes
 ---
+
+## 2026-03-02 - US-037
+- Created ToolUsage model in `backend/app/models/tool_usage.py` with fields: id (UUID PK), agent_type, tool_name, task_id, action_id, success, duration_ms, error (nullable), created_at
+- Registered in `models/__init__.py` and `database.py` init_db()
+- Instrumented CodingAgent: fire-and-forget `_record_tool_usage()` call after each tool dispatch in `_execute_tool()` — covers read_file, write_file, edit_file, glob, grep, bash, and MCP tools
+- Instrumented MCPAgent: same pattern after each MCP tool call in the agentic loop
+- Instrumented CodeExecutionAgent: wrapped `run_code()` call with timing, records each code execution as a tool usage entry
+- Files changed: `backend/app/models/tool_usage.py` (new), `backend/app/models/__init__.py`, `backend/app/database.py`, `backend/app/services/agents/coding_agent.py`, `backend/app/services/agents/mcp_agent.py`, `backend/app/services/agents/code_execution_agent.py`
+- **Learnings for future iterations:**
+  - `_record_tool_usage` helper is duplicated in 3 agent files — could be extracted to a shared module if more agents need it
+  - CodingAgent and MCPAgent already track tool_calls_data with duration_ms and success, so instrumentation slots in cleanly after the append
+  - CodeExecutionAgent doesn't have a tool dispatch loop — it runs code once, so the timing wraps `run_code()` directly
+  - Error text is truncated to 2000 chars to prevent large stderr from bloating the DB
+---
+
+## 2026-03-02 - US-038
+- Added tool analytics API endpoints in new `backend/app/routers/analytics.py` router with `/analytics` prefix
+- `GET /analytics/tools` — aggregate tool stats with optional `?agent_type=` and `?days=` filters; returns tool_name, total_calls, success_rate, avg_duration_ms, agent_types
+- `GET /analytics/agents/{agent_type}/tools` — per-agent-type tool breakdown with optional `?days=` filter
+- Uses SQLAlchemy `func.sum(case(...))` for success rate calculation and `func.group_concat(distinct)` for agent_types
+- Registered router in `main.py`
+- Created `frontend/src/lib/api/tool-analytics.ts` API client with `getToolAnalytics()` and `getAgentToolAnalytics()` functions
+- Created `frontend/src/hooks/use-tool-analytics.ts` with `useToolAnalytics()` and `useAgentToolAnalytics()` React Query hooks
+- Added `ToolUsageSection` component to agent detail page (`/agents/:id`) with tool usage table and 7d/30d/All time range filter
+- Success rate color coding: red < 50%, orange < 80%, default otherwise
+- Files changed: `backend/app/routers/analytics.py` (new), `backend/app/main.py`, `frontend/src/lib/api/tool-analytics.ts` (new), `frontend/src/hooks/use-tool-analytics.ts` (new), `frontend/src/app/agents/[id]/page.tsx`
+- **Learnings for future iterations:**
+  - SQLite `group_concat(DISTINCT col)` works for aggregating distinct values into CSV; split in Python
+  - `case((condition, value), else_=default)` in SQLAlchemy for conditional aggregation (success rate pattern)
+  - Cast to Float needed for proper division result in SQLite
+  - Analytics router pattern: separate from entity routers, prefix `/analytics`, use Query params for filters
+---
