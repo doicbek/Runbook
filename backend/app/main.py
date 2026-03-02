@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import async_session, engine, init_db
-from app.routers import actions, agent_memory, agent_skills, artifacts, models, tasks
+from app.routers import actions, agent_memory, agent_skills, artifacts, cost, models, tasks
 from app.routers import agent_definitions, planner_config
 from app.services.iteration_cleanup import iteration_cleanup_loop
 
@@ -62,6 +62,7 @@ app.include_router(agent_definitions.router)
 app.include_router(agent_skills.router)
 app.include_router(planner_config.router)
 app.include_router(agent_memory.router)
+app.include_router(cost.router)
 
 
 @app.get("/health")
