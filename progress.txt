@@ -718,3 +718,23 @@
   - Zustand store accumulates per-task and per-model costs incrementally from SSE events — no need to poll API
   - Use `tabular-nums` class for font-variant-numeric alignment in cost tables
 ---
+
+## 2026-03-01 - US-031
+- Implemented ActionTemplate model in `backend/app/models/action_template.py`
+- Fields: id (UUID PK), title, description, root_prompt, tags (JSON-encoded list), source_action_id, usage_count, created_at, updated_at
+- Created templates CRUD router in `backend/app/routers/templates.py` with endpoints:
+  - GET /templates (list, with ?tag= and ?search= filters)
+  - GET /templates/{id} (detail)
+  - POST /templates (create)
+  - PATCH /templates/{id} (update title, description, tags)
+  - DELETE /templates/{id}
+  - POST /templates/{id}/use (create action from template, increment usage_count, auto-run)
+  - POST /templates/from-action/{action_id} (save action as template with LLM-generated title/description)
+- Added convenience endpoint POST /actions/{id}/save-as-template in actions router
+- Registered model in models/__init__.py, database.py, and router in main.py
+- Files changed: `backend/app/models/action_template.py` (new), `backend/app/routers/templates.py` (new), `backend/app/models/__init__.py`, `backend/app/database.py`, `backend/app/main.py`, `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - Tags stored as JSON-encoded string in Text column (not sqlalchemy.JSON) — parse with json.loads in response helper
+  - POST /templates/from-action/{action_id} path avoids conflict with POST /templates/{id}/use by using distinct prefix
+  - Convenience endpoint on actions router delegates to templates router function to avoid code duplication
+---
