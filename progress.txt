@@ -694,3 +694,12 @@
   - Fire-and-forget DB writes: use `asyncio.create_task()` with a full `async with async_session()` inside, wrapped in try/except
   - Internal helpers can return tuples without affecting public API — `chat_completion` still returns `str`
 ---
+
+## 2026-03-01 - US-029
+- Implemented cost API endpoints: GET /actions/{id}/cost and GET /cost/summary
+- Files changed: backend/app/routers/cost.py (new), backend/app/main.py
+- **Learnings for future iterations:**
+  - Cost router uses efficient aggregate SQL (SUM, GROUP BY, COALESCE) against LLMUsage table
+  - By-agent-type breakdown joins LLMUsage to Task on task_id to get agent_type
+  - Time-range filtering uses datetime arithmetic with timedelta
+---
