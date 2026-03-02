@@ -765,3 +765,22 @@
   - saveAsTemplate API client already existed at `/templates/from-action/{actionId}` — just needed the React Query hook wrapper
   - Dialog reset pattern: reset tab state in onOpenChange callback when dialog closes
 ---
+
+## 2026-03-02 - US-034
+- Implemented ActionSchedule model in `backend/app/models/action_schedule.py`
+- Fields: id (UUID PK), title, root_prompt, cron_expression, is_active, last_run_at, next_run_at, run_count, consecutive_failures, template_id, created_at, updated_at
+- Registered model in `models/__init__.py` and `database.py` init_db imports
+- Added `croniter>=1.3.0` to `backend/requirements.txt`
+- Implemented background scheduler in `backend/app/services/scheduler.py`:
+  - `scheduler_loop()` polls every 30s for active schedules where `next_run_at <= now`
+  - `_create_action_from_schedule()` creates action via planner + executor (same logic as POST /actions)
+  - `_track_action_completion()` polls action status to update `consecutive_failures` (reset on success, increment on failure)
+  - Uses croniter to compute next_run_at after each run
+- Registered `scheduler_loop` in app lifespan (main.py) alongside cleanup task
+- Files changed: `backend/app/models/action_schedule.py` (new), `backend/app/services/scheduler.py` (new), `backend/app/models/__init__.py`, `backend/app/database.py`, `backend/app/main.py`, `backend/requirements.txt`
+- **Learnings for future iterations:**
+  - `croniter(cron_expression, start_time).get_next(datetime)` computes next occurrence; returns naive datetime so add tzinfo if needed
+  - Background tasks follow the pattern in `iteration_cleanup.py`: `asyncio.create_task` in lifespan, cancel on shutdown
+  - Use `async_session()` context manager for DB access in background services (not `get_db` which is a FastAPI dependency)
+  - `pip install pkg>=ver` on WSL can create spurious files — check for `=version` file in working dir
+---
