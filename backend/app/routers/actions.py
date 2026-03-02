@@ -342,3 +342,10 @@ async def action_events(action_id: str, request: Request, db: AsyncSession = Dep
             event_bus.unsubscribe(action_id, queue)
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/{action_id}/save-as-template", status_code=201)
+async def save_action_as_template(action_id: str, db: AsyncSession = Depends(get_db)):
+    """Convenience endpoint: save a completed action as a template."""
+    from app.routers.templates import save_action_as_template as _save
+    return await _save(action_id, db)

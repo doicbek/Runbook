@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import action, agent_definition, agent_iteration, agent_memory_model, agent_skill, skill_relation, artifact, llm_usage, log, planner_config, task, task_output  # noqa: F401
+    from app.models import action, action_template, agent_definition, agent_iteration, agent_memory_model, agent_skill, skill_relation, artifact, llm_usage, log, planner_config, task, task_output  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
