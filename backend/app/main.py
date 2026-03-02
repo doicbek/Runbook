@@ -10,6 +10,7 @@ from app.database import async_session, engine, init_db
 from app.routers import actions, agent_memory, agent_skills, artifacts, cost, models, tasks, templates
 from app.routers import agent_definitions, planner_config
 from app.services.iteration_cleanup import iteration_cleanup_loop
+from app.services.scheduler import scheduler_loop
 
 
 @asynccontextmanager
@@ -39,8 +40,11 @@ async def lifespan(app: FastAPI):
     chroma_dir.mkdir(parents=True, exist_ok=True)
     # Start iteration cleanup background task
     cleanup_task = asyncio.create_task(iteration_cleanup_loop())
+    # Start schedule polling background task
+    scheduler_task = asyncio.create_task(scheduler_loop())
     yield
     cleanup_task.cancel()
+    scheduler_task.cancel()
     await engine.dispose()
 
 

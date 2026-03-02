@@ -1,4 +1,5 @@
 from app.models.action import Action
+from app.models.action_schedule import ActionSchedule
 from app.models.agent_definition import AgentDefinition
 from app.models.agent_iteration import AgentIteration
 from app.models.agent_memory_model import AgentMemory, AgentMemoryVersion
@@ -14,6 +15,7 @@ from app.models.task_output import TaskOutput
 
 __all__ = [
     "Action",
+    "ActionSchedule",
     "AgentDefinition",
     "AgentIteration",
     "AgentMemory",
