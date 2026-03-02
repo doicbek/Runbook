@@ -371,6 +371,20 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
           Skills
         </Link>
         <Link
+          href="/templates"
+          className={`flex items-center gap-2 px-2 py-1 text-[11px] rounded transition-colors ${
+            pathname === "/templates"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="2" y="2" width="12" height="12" rx="2" />
+            <path d="M5 5h6M5 8h4M5 11h5" strokeLinecap="round" />
+          </svg>
+          Templates
+        </Link>
+        <Link
           href="/planner"
           className={`flex items-center gap-2 px-2 py-1 text-[11px] rounded transition-colors ${
             pathname === "/planner"

@@ -738,3 +738,18 @@
   - POST /templates/from-action/{action_id} path avoids conflict with POST /templates/{id}/use by using distinct prefix
   - Convenience endpoint on actions router delegates to templates router function to avoid code duplication
 ---
+
+## 2026-03-02 - US-032
+- Verified all template frontend code already implemented (from US-031 work)
+- Frontend API client at `frontend/src/lib/api/templates.ts`: listTemplates, createTemplate, updateTemplate, deleteTemplate, useTemplateApi, saveAsTemplate
+- React Query hooks at `frontend/src/hooks/use-templates.ts`: useTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate, useUseTemplate
+- Templates page at `frontend/src/app/templates/page.tsx`: grid layout with TemplateCard, CreateTemplateForm, EditTemplateForm components
+- Features: search input, tag filter chips, create/edit/delete/use buttons, usage count display, description truncation
+- Sidebar nav link added at `frontend/src/components/app-sidebar.tsx`
+- TypeScript and Python typechecks pass
+- Files committed: frontend/src/app/templates/, frontend/src/lib/api/templates.ts, frontend/src/hooks/use-templates.ts, frontend/src/components/app-sidebar.tsx, frontend/src/types/index.ts
+- **Learnings for future iterations:**
+  - Templates page follows same pattern as agents/skills pages: centered container, header, grid, loading/error/empty states
+  - Tag filtering uses dynamic extraction from template data (useMemo to collect unique tags)
+  - useUseTemplate hook invalidates ["actions"] query key since it creates a new action
+---

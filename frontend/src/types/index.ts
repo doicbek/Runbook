@@ -250,6 +250,18 @@ export interface AgentIterationToolCall {
   success: boolean;
 }
 
+export interface ActionTemplate {
+  id: string;
+  title: string;
+  description: string | null;
+  root_prompt: string;
+  tags: string[];
+  source_action_id: string | null;
+  usage_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentIteration {
   id: string;
   task_id: string;
