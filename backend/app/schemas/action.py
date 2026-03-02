@@ -28,6 +28,7 @@ class ActionResponse(BaseModel):
     output_contract: str | None = None
     depth: int = 0
     retry_count: int = 0
+    forked_from_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -42,6 +43,7 @@ class ActionListResponse(BaseModel):
     task_count: int = 0
     parent_action_id: str | None = None
     depth: int = 0
+    forked_from_id: str | None = None
 
     model_config = {"from_attributes": True}
 

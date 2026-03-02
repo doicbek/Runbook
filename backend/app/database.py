@@ -44,6 +44,8 @@ async def init_db():
             "ALTER TABLE agent_skills ADD COLUMN last_seen DATETIME",
             # Task timeout
             "ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER",
+            # Action forking
+            "ALTER TABLE actions ADD COLUMN forked_from_id TEXT",
         ]:
             try:
                 await conn.execute(text(stmt))

@@ -129,6 +129,7 @@ async def list_actions(
                 task_count=task_count,
                 parent_action_id=action.parent_action_id,
                 depth=action.depth or 0,
+                forked_from_id=getattr(action, "forked_from_id", None),
             )
         )
 
@@ -342,6 +343,93 @@ async def action_events(action_id: str, request: Request, db: AsyncSession = Dep
             event_bus.unsubscribe(action_id, queue)
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/{action_id}/fork", response_model=ActionResponse, status_code=201)
+async def fork_action(action_id: str, db: AsyncSession = Depends(get_db)):
+    """Fork an action: copy the action and all tasks with new UUIDs, remap dependencies."""
+    import uuid as uuid_mod
+
+    result = await db.execute(
+        select(Action).options(selectinload(Action.tasks)).where(Action.id == action_id)
+    )
+    action = result.scalar_one_or_none()
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    # Create new action
+    new_action = Action(
+        root_prompt=action.root_prompt,
+        title=f"{action.title} (fork)",
+        status="draft",
+        forked_from_id=action_id,
+    )
+    db.add(new_action)
+    await db.flush()
+
+    # Build old->new task ID mapping
+    id_map: dict[str, str] = {}
+    for task in action.tasks:
+        id_map[task.id] = str(uuid_mod.uuid4())
+
+    # Copy tasks with remapped dependencies
+    for task in action.tasks:
+        new_deps = [id_map.get(dep, dep) for dep in (task.dependencies or [])]
+        new_task = Task(
+            id=id_map[task.id],
+            action_id=new_action.id,
+            prompt=task.prompt,
+            status="pending",
+            agent_type=task.agent_type,
+            model=task.model,
+            dependencies=new_deps,
+            timeout_seconds=task.timeout_seconds,
+        )
+        db.add(new_task)
+
+    await db.commit()
+
+    # Return the new action with tasks
+    result = await db.execute(
+        select(Action).options(selectinload(Action.tasks)).where(Action.id == new_action.id)
+    )
+    return result.scalar_one()
+
+
+@router.get("/{action_id}/forks", response_model=list[ActionListResponse])
+async def list_forks(action_id: str, db: AsyncSession = Depends(get_db)):
+    """List all actions forked from this action."""
+    # Verify the source action exists
+    result = await db.execute(select(Action).where(Action.id == action_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    task_count_col = func.count(Task.id).label("task_count")
+    query = (
+        select(Action, task_count_col)
+        .outerjoin(Task, Task.action_id == Action.id)
+        .where(Action.forked_from_id == action_id)
+        .group_by(Action.id)
+        .order_by(Action.created_at.desc())
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        ActionListResponse(
+            id=a.id,
+            title=a.title,
+            root_prompt=a.root_prompt,
+            status=a.status,
+            created_at=a.created_at,
+            updated_at=a.updated_at,
+            task_count=tc,
+            parent_action_id=a.parent_action_id,
+            depth=a.depth or 0,
+            forked_from_id=getattr(a, "forked_from_id", None),
+        )
+        for a, tc in rows
+    ]
 
 
 @router.post("/{action_id}/save-as-template", status_code=201)
