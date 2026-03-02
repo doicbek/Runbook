@@ -5,6 +5,7 @@ Uses the same agentic loop pattern as CodingAgent (LLM -> tool calls -> execute
 ``fail`` terminal tools so the LLM can signal completion.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -14,6 +15,7 @@ from typing import Any
 
 from app.database import async_session
 from app.models.agent_iteration import AgentIteration
+from app.models.tool_usage import ToolUsage
 from app.services.agents.base import BaseAgent
 from app.services.event_bus import event_bus
 from app.services.llm_client import MODEL_REGISTRY, get_default_model_for_agent
@@ -22,6 +24,32 @@ from app.services.mcp_client import MCPServerConfig, MCPSession
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 50
+
+
+async def _record_tool_usage(
+    agent_type: str,
+    tool_name: str,
+    task_id: str,
+    action_id: str,
+    success: bool,
+    duration_ms: int,
+    error: str | None = None,
+) -> None:
+    """Fire-and-forget: insert a ToolUsage row."""
+    try:
+        async with async_session() as db:
+            db.add(ToolUsage(
+                agent_type=agent_type,
+                tool_name=tool_name,
+                task_id=task_id,
+                action_id=action_id,
+                success=success,
+                duration_ms=duration_ms,
+                error=error[:2000] if error else None,
+            ))
+            await db.commit()
+    except Exception:
+        logger.debug("Failed to record tool usage", exc_info=True)
 
 TERMINAL_TOOLS = [
     {
@@ -266,6 +294,14 @@ class MCPAgent(BaseAgent):
                     "output": _truncate(output_str, 5000),
                     "duration_ms": tc_duration, "success": success,
                 })
+
+                # Record tool usage (fire-and-forget)
+                asyncio.create_task(_record_tool_usage(
+                    agent_type="mcp", tool_name=tool_name,
+                    task_id=task_id, action_id=action_id,
+                    success=success, duration_ms=tc_duration,
+                    error=output_str if not success else None,
+                ))
 
                 if log_callback:
                     status = "OK" if success else "FAILED"

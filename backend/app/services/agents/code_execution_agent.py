@@ -1,16 +1,45 @@
+import asyncio
 import logging
 import re
+import time
 from typing import Any
 
 from sqlalchemy import select
 
 from app.database import async_session
 from app.models import Artifact, TaskOutput
+from app.models.tool_usage import ToolUsage
 from app.services.agents.base import BaseAgent
 from app.services.code_runner import run_code
 from app.services.llm_client import chat_completion, get_default_model_for_agent
 
 logger = logging.getLogger(__name__)
+
+
+async def _record_tool_usage(
+    agent_type: str,
+    tool_name: str,
+    task_id: str,
+    action_id: str,
+    success: bool,
+    duration_ms: int,
+    error: str | None = None,
+) -> None:
+    """Fire-and-forget: insert a ToolUsage row."""
+    try:
+        async with async_session() as db:
+            db.add(ToolUsage(
+                agent_type=agent_type,
+                tool_name=tool_name,
+                task_id=task_id,
+                action_id=action_id,
+                success=success,
+                duration_ms=duration_ms,
+                error=error[:2000] if error else None,
+            ))
+            await db.commit()
+    except Exception:
+        logger.debug("Failed to record tool usage", exc_info=True)
 
 
 class CodeExecutionAgent(BaseAgent):
@@ -61,6 +90,7 @@ class CodeExecutionAgent(BaseAgent):
         if log_callback:
             await log_callback("info", "Executing Python code...")
 
+        exec_start = time.time()
         exec_result = await run_code(
             task_id=task_id,
             action_id=action_id,
@@ -73,6 +103,16 @@ class CodeExecutionAgent(BaseAgent):
         stderr = exec_result["stderr"]
         exit_code = exec_result["exit_code"]
         files = exec_result["files"]
+        exec_duration = int((time.time() - exec_start) * 1000)
+        exec_success = exit_code == 0
+
+        # Record code execution as tool usage (fire-and-forget)
+        asyncio.create_task(_record_tool_usage(
+            agent_type="code_execution", tool_name="run_code",
+            task_id=task_id, action_id=action_id,
+            success=exec_success, duration_ms=exec_duration,
+            error=stderr[:2000] if not exec_success and stderr else None,
+        ))
 
         if log_callback:
             if exit_code == 0:

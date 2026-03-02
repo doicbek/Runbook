@@ -17,6 +17,7 @@ from typing import Any
 from app.database import async_session
 from app.models.agent_iteration import AgentIteration
 from app.models.artifact import Artifact
+from app.models.tool_usage import ToolUsage
 from app.services.agents.base import BaseAgent
 from app.services.agents.coding_tools import (
     bash_run,
@@ -36,6 +37,32 @@ ARTIFACTS_DIR = Path(__file__).parent.parent.parent / "artifacts"
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 50
+
+
+async def _record_tool_usage(
+    agent_type: str,
+    tool_name: str,
+    task_id: str,
+    action_id: str,
+    success: bool,
+    duration_ms: int,
+    error: str | None = None,
+) -> None:
+    """Fire-and-forget: insert a ToolUsage row."""
+    try:
+        async with async_session() as db:
+            db.add(ToolUsage(
+                agent_type=agent_type,
+                tool_name=tool_name,
+                task_id=task_id,
+                action_id=action_id,
+                success=success,
+                duration_ms=duration_ms,
+                error=error[:2000] if error else None,
+            ))
+            await db.commit()
+    except Exception:
+        logger.debug("Failed to record tool usage", exc_info=True)
 
 # ── Tool schemas for LLM function calling ────────────────────────────────────
 
@@ -555,6 +582,14 @@ class CodingAgent(BaseAgent):
                     "duration_ms": tc_duration,
                     "success": success,
                 })
+
+                # Record tool usage (fire-and-forget)
+                asyncio.create_task(_record_tool_usage(
+                    agent_type="coding", tool_name=tool_name,
+                    task_id=task_id, action_id=action_id,
+                    success=success, duration_ms=tc_duration,
+                    error=output_str if not success else None,
+                ))
 
                 if log_callback:
                     status = "OK" if success else "FAILED"
