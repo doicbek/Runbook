@@ -680,3 +680,17 @@
   - LLM_PRICING keys match MODEL_REGISTRY keys (provider/model_id format)
   - LLMUsage has nullable action_id and task_id to support tracking calls not tied to a specific task (e.g. utility calls)
 ---
+
+## 2026-03-01 - US-028
+- Added `_record_llm_usage()` helper to `llm_client.py`: computes cost from `LLM_PRICING`, inserts `LLMUsage` row, and publishes `cost.update` SSE event with running total
+- Modified `_anthropic_completion` and `_openai_compatible_completion` to return `(text, usage_dict)` tuples
+- `chat_completion` now pops `action_id`/`task_id` from kwargs, fires `asyncio.create_task(_record_llm_usage(...))` after each call
+- `chat_completion_stream` also tracks usage: Anthropic via `stream.get_final_message()`, OpenAI via `stream_options={"include_usage": True}`
+- `_anthropic_stream` and `_openai_compatible_stream` now accept a mutable `usage_out` dict populated at stream end
+- Files changed: `backend/app/services/llm_client.py`
+- **Learnings for future iterations:**
+  - Anthropic streaming usage: use `await stream.get_final_message()` after the text_stream loop inside the `async with` block
+  - OpenAI streaming usage: pass `stream_options={"include_usage": True}` and check `chunk.usage` on each chunk (final chunk has it)
+  - Fire-and-forget DB writes: use `asyncio.create_task()` with a full `async with async_session()` inside, wrapped in try/except
+  - Internal helpers can return tuples without affecting public API — `chat_completion` still returns `str`
+---
