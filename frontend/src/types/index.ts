@@ -79,6 +79,18 @@ export interface Artifact {
   created_at: string;
 }
 
+export interface ArtifactVersion {
+  id: string;
+  artifact_id: string;
+  version: number;
+  size_bytes: number | null;
+  created_at: string;
+}
+
+export interface ArtifactDiffResponse {
+  diff: string;
+}
+
 export interface CodeExecutionResult {
   stdout: string;
   stderr: string;

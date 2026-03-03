@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE } from "@/lib/api";
-import type { AgentIteration, CodeExecutionResult, LogEntry, Task } from "@/types";
+import type { AgentIteration, Artifact, ArtifactDiffResponse, ArtifactVersion, CodeExecutionResult, LogEntry, Task } from "@/types";
 
 export async function createTask(
   actionId: string,
@@ -74,4 +74,20 @@ export async function resumeTask(
 
 export function getArtifactUrl(artifactId: string): string {
   return `${API_BASE}/artifacts/${artifactId}/content`;
+}
+
+export async function getArtifact(artifactId: string): Promise<Artifact> {
+  return apiFetch<Artifact>(`/artifacts/${artifactId}`);
+}
+
+export async function listArtifactVersions(artifactId: string): Promise<ArtifactVersion[]> {
+  return apiFetch<ArtifactVersion[]>(`/artifacts/${artifactId}/versions`);
+}
+
+export function getArtifactVersionContentUrl(artifactId: string, version: number): string {
+  return `${API_BASE}/artifacts/${artifactId}/versions/${version}/content`;
+}
+
+export async function getArtifactDiff(artifactId: string, v1: number, v2: number): Promise<ArtifactDiffResponse> {
+  return apiFetch<ArtifactDiffResponse>(`/artifacts/${artifactId}/diff?v1=${v1}&v2=${v2}`);
 }

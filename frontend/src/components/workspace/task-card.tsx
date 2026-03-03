@@ -11,8 +11,8 @@ import { Button } from "@/components/ui/button";
 import { useActionStore } from "@/stores/action-store";
 import { useAction } from "@/hooks/use-actions";
 import { useRunCode } from "@/hooks/use-tasks";
-import { getArtifactUrl } from "@/lib/api/tasks";
-import type { Artifact, CodeExecutionState, Task } from "@/types";
+import { getArtifact, getArtifactUrl, getArtifactVersionContentUrl, listArtifactVersions, getArtifactDiff } from "@/lib/api/tasks";
+import type { Artifact, ArtifactVersion, CodeExecutionState, Task } from "@/types";
 import { TaskCardEditor } from "./task-card-editor";
 import { TaskLogsDrawer } from "./task-logs-drawer";
 import { IterationSummary } from "./iteration-summary";
@@ -821,14 +821,210 @@ function SubActionProgress({
 }
 
 function ArtifactDisplay({ artifactId }: { artifactId: string }) {
-  const url = getArtifactUrl(artifactId);
+  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [versions, setVersions] = useState<ArtifactVersion[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+  const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffText, setDiffText] = useState<string>("");
+  const [diffVersions, setDiffVersions] = useState<{ v1: number; v2: number } | null>(null);
+  const [loadingDiff, setLoadingDiff] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // We render the image inline optimistically (the content endpoint will set correct mime type)
-  // For non-images, we show a download link
+  // Fetch artifact metadata
+  useEffect(() => {
+    getArtifact(artifactId).then(setArtifact).catch(() => {});
+  }, [artifactId]);
+
+  // Fetch versions when dropdown is opened
+  useEffect(() => {
+    if (versionDropdownOpen && artifact && artifact.current_version > 1 && versions.length === 0) {
+      listArtifactVersions(artifactId).then(setVersions).catch(() => {});
+    }
+  }, [versionDropdownOpen, artifact, artifactId, versions.length]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!versionDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setVersionDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [versionDropdownOpen]);
+
+  const currentVersion = artifact?.current_version ?? 1;
+  const hasVersions = currentVersion > 1;
+  const isTextArtifact = artifact?.mime_type?.startsWith("text/") || artifact?.mime_type === "application/json";
+
+  // Determine the content URL based on selected version
+  const contentUrl = selectedVersion !== null && selectedVersion !== currentVersion
+    ? getArtifactVersionContentUrl(artifactId, selectedVersion)
+    : getArtifactUrl(artifactId);
+
+  const handleCompare = async (v1: number, v2: number) => {
+    setLoadingDiff(true);
+    setDiffVersions({ v1, v2 });
+    try {
+      const result = await getArtifactDiff(artifactId, v1, v2);
+      setDiffText(result.diff);
+      setDiffOpen(true);
+    } catch {
+      setDiffText("Failed to load diff.");
+      setDiffOpen(true);
+    } finally {
+      setLoadingDiff(false);
+    }
+  };
+
   return (
     <div className="artifact-item">
-      {/* Try rendering as image - if it fails, show download link */}
-      <ArtifactImage url={url} artifactId={artifactId} />
+      {/* Version badge row */}
+      {hasVersions && (
+        <div className="flex items-center gap-1.5 mb-1.5 relative" ref={dropdownRef}>
+          <button
+            onClick={() => setVersionDropdownOpen((v) => !v)}
+            className="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors cursor-pointer"
+          >
+            v{selectedVersion ?? currentVersion}
+            <svg className={`w-2.5 h-2.5 transition-transform ${versionDropdownOpen ? "rotate-180" : ""}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {isTextArtifact && currentVersion > 1 && (
+            <button
+              onClick={() => handleCompare(currentVersion - 1, currentVersion)}
+              disabled={loadingDiff}
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M1 3h4M7 3h4M1 6h4M7 6h4M1 9h4M7 9h4" strokeLinecap="round" />
+              </svg>
+              {loadingDiff ? "Loading..." : "Compare"}
+            </button>
+          )}
+
+          {/* Version dropdown */}
+          {versionDropdownOpen && (
+            <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[180px]">
+              {/* Current version */}
+              <button
+                onClick={() => { setSelectedVersion(null); setVersionDropdownOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-muted/60 flex items-center justify-between ${
+                  selectedVersion === null ? "bg-muted/40 font-medium" : ""
+                }`}
+              >
+                <span>v{currentVersion} (current)</span>
+                <span className="text-[9px] text-muted-foreground">
+                  {artifact?.created_at ? new Date(artifact.created_at).toLocaleDateString() : ""}
+                </span>
+              </button>
+
+              {/* Older versions */}
+              {versions.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => { setSelectedVersion(v.version); setVersionDropdownOpen(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-muted/60 flex items-center justify-between ${
+                    selectedVersion === v.version ? "bg-muted/40 font-medium" : ""
+                  }`}
+                >
+                  <span>v{v.version}</span>
+                  <span className="text-[9px] text-muted-foreground">
+                    {new Date(v.created_at).toLocaleDateString()}
+                  </span>
+                </button>
+              ))}
+
+              {versions.length === 0 && (
+                <div className="px-3 py-1.5 text-[10px] text-muted-foreground">Loading versions...</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Artifact content */}
+      <ArtifactImage url={contentUrl} artifactId={artifactId} />
+
+      {/* Diff view */}
+      {diffOpen && diffVersions && (
+        <ArtifactDiffView
+          diff={diffText}
+          v1={diffVersions.v1}
+          v2={diffVersions.v2}
+          onClose={() => { setDiffOpen(false); setDiffText(""); setDiffVersions(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ArtifactDiffView({
+  diff,
+  v1,
+  v2,
+  onClose,
+}: {
+  diff: string;
+  v1: number;
+  v2: number;
+  onClose: () => void;
+}) {
+  if (!diff) {
+    return (
+      <div className="mt-2 rounded-md border border-border bg-muted/30 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Diff v{v1} &rarr; v{v2}
+          </span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 3l6 6M9 3l-6 6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">No differences found.</p>
+      </div>
+    );
+  }
+
+  const lines = diff.split("\n");
+
+  return (
+    <div className="mt-2 rounded-md border border-border bg-zinc-950 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-muted/30">
+        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+          Diff v{v1} &rarr; v{v2}
+        </span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 3l6 6M9 3l-6 6" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div className="max-h-[300px] overflow-y-auto p-2">
+        <pre className="text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-words">
+          {lines.map((line, i) => {
+            let lineClass = "text-zinc-400";
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              lineClass = "text-emerald-400 bg-emerald-950/30";
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              lineClass = "text-red-400 bg-red-950/30";
+            } else if (line.startsWith("@@")) {
+              lineClass = "text-blue-400";
+            }
+            return (
+              <div key={i} className={`px-1 ${lineClass}`}>
+                {line}
+              </div>
+            );
+          })}
+        </pre>
+      </div>
     </div>
   );
 }
@@ -836,6 +1032,12 @@ function ArtifactDisplay({ artifactId }: { artifactId: string }) {
 function ArtifactImage({ url, artifactId }: { url: string; artifactId: string }) {
   const [isImage, setIsImage] = useState(true);
   const [loaded, setLoaded] = useState(false);
+
+  // Reset state when URL changes (version switch)
+  useEffect(() => {
+    setIsImage(true);
+    setLoaded(false);
+  }, [url]);
 
   if (!isImage) {
     return (
