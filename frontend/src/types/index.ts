@@ -11,6 +11,7 @@ export interface Action {
   output_contract: string | null;
   depth: number;
   retry_count: number;
+  forked_from_id: string | null;
 }
 
 export interface ActionListItem {
@@ -23,6 +24,7 @@ export interface ActionListItem {
   task_count: number;
   parent_action_id: string | null;
   depth: number;
+  forked_from_id: string | null;
 }
 
 export interface PaginatedActions {

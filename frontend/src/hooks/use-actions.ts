@@ -2,9 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createAction,
   deleteAction,
+  forkAction,
   getAction,
   getBreadcrumbs,
   listActions,
+  listForks,
   runAction,
   updateAction,
 } from "@/lib/api/actions";
@@ -72,5 +74,23 @@ export function useDeleteAction() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["actions"] });
     },
+  });
+}
+
+export function useForkAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: forkAction,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["actions"] });
+    },
+  });
+}
+
+export function useForks(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["forks", id],
+    queryFn: () => listForks(id),
+    enabled: enabled && !!id,
   });
 }

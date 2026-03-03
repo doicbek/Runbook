@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { Action, PaginatedActions } from "@/types";
+import type { Action, ActionListItem, PaginatedActions } from "@/types";
 
 export async function listActions(params?: {
   search?: string;
@@ -60,4 +60,14 @@ export interface BreadcrumbItem {
 
 export async function getBreadcrumbs(id: string): Promise<BreadcrumbItem[]> {
   return apiFetch<BreadcrumbItem[]>(`/actions/${id}/breadcrumbs`);
+}
+
+export async function forkAction(id: string): Promise<Action> {
+  return apiFetch<Action>(`/actions/${id}/fork`, {
+    method: "POST",
+  });
+}
+
+export async function listForks(id: string): Promise<ActionListItem[]> {
+  return apiFetch<ActionListItem[]>(`/actions/${id}/forks`);
 }

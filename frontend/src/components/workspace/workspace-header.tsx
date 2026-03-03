@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useRunAction, useBreadcrumbs, useDeleteAction } from "@/hooks/use-actions";
+import { useRunAction, useBreadcrumbs, useDeleteAction, useForkAction, useForks } from "@/hooks/use-actions";
 import { useSaveAsTemplate } from "@/hooks/use-templates";
 import { useActionStore } from "@/stores/action-store";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -29,10 +29,12 @@ export function WorkspaceHeader({ action }: { action: Action }) {
   const router = useRouter();
   const runAction = useRunAction();
   const deleteAction = useDeleteAction();
+  const forkAction = useForkAction();
   const saveAsTemplate = useSaveAsTemplate();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
   const [costPanelOpen, setCostPanelOpen] = useState(false);
+  const [forksDropdownOpen, setForksDropdownOpen] = useState(false);
   const sseStatus = useActionStore((s) => s.actionStatus);
   const recoveryAttempt = useActionStore((s) => s.recoveryAttempt);
   const isReplanning = useActionStore((s) => s.isReplanning);
@@ -45,6 +47,8 @@ export function WorkspaceHeader({ action }: { action: Action }) {
   const hasPendingTasks = action.tasks.some((t) => t.status === "pending");
   const isRunning = status === "running";
   const isRecovering = isRunning && recoveryAttempt !== null && !isReplanning;
+  const canFork = status === "completed" || status === "failed";
+  const { data: forks } = useForks(action.id, forksDropdownOpen);
 
   const isSubAction = !!action.parent_action_id;
   const { data: breadcrumbs } = useBreadcrumbs(action.id, isSubAction);
@@ -142,6 +146,65 @@ export function WorkspaceHeader({ action }: { action: Action }) {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            {canFork && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={forkAction.isPending}
+                onClick={async () => {
+                  const forked = await forkAction.mutateAsync(action.id);
+                  router.push(`/actions/${forked.id}`);
+                }}
+                className="gap-1.5 text-xs"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="5" cy="3.5" r="1.5" />
+                  <circle cx="11" cy="3.5" r="1.5" />
+                  <circle cx="8" cy="12.5" r="1.5" />
+                  <path d="M5 5v2a3 3 0 003 3m3-5v2a3 3 0 01-3 3m0 0v0" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {forkAction.isPending ? "Forking..." : "Fork"}
+              </Button>
+            )}
+            {/* Forks count badge */}
+            <div className="relative">
+              <button
+                onClick={() => setForksDropdownOpen((v) => !v)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer border-0"
+                title="View forks"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="5" cy="3.5" r="1.5" />
+                  <circle cx="11" cy="3.5" r="1.5" />
+                  <circle cx="8" cy="12.5" r="1.5" />
+                  <path d="M5 5v2a3 3 0 003 3m3-5v2a3 3 0 01-3 3m0 0v0" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {forks ? forks.length : "..."}
+              </button>
+              {forksDropdownOpen && (
+                <div className="absolute right-0 top-full mt-1 w-64 bg-popover border rounded-md shadow-md z-20 py-1">
+                  <div className="px-3 py-1.5 text-[10px] font-medium uppercase text-muted-foreground tracking-wider border-b">
+                    Forks
+                  </div>
+                  {forks && forks.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">No forks yet</div>
+                  )}
+                  {forks?.map((fork) => (
+                    <Link
+                      key={fork.id}
+                      href={`/actions/${fork.id}`}
+                      className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+                      onClick={() => setForksDropdownOpen(false)}
+                    >
+                      <Badge variant="secondary" className={`text-[9px] px-1 py-0 ${statusColors[fork.status]}`}>
+                        {fork.status}
+                      </Badge>
+                      <span className="truncate flex-1">{fork.title}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
             {status === "completed" && (
               <Button
                 size="sm"

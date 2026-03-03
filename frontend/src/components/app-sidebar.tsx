@@ -320,6 +320,20 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
                 ) : (
                   <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
                 )}
+                {action.forked_from_id && (
+                  <svg
+                    className="w-3 h-3 text-muted-foreground/50 shrink-0"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <circle cx="5" cy="3.5" r="1.5" />
+                    <circle cx="11" cy="3.5" r="1.5" />
+                    <circle cx="8" cy="12.5" r="1.5" />
+                    <path d="M5 5v2a3 3 0 003 3m3-5v2a3 3 0 01-3 3m0 0v0" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
                 <span className="truncate flex-1 font-medium">{action.title}</span>
               </Link>
               <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
