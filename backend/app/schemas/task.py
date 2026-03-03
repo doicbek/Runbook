@@ -61,6 +61,16 @@ class ArtifactResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ArtifactVersionResponse(BaseModel):
+    id: str
+    artifact_id: str
+    version: int
+    size_bytes: int | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class LogResponse(BaseModel):
     id: str
     task_id: str

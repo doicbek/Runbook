@@ -880,3 +880,39 @@
   - SVG elements in React/TypeScript don't accept `title` as a direct prop — use a `<title>` child element or remove it to avoid TS errors
   - Most of the fork UI was already scaffolded alongside the backend endpoint (US-039) but not committed — check for uncommitted related work before starting a story
 ---
+
+## 2026-03-02 - US-041
+- Implemented ArtifactVersion model in `backend/app/models/artifact_version.py`
+- Added `current_version` column to Artifact model and migration in `init_db()`
+- Created centralized `backend/app/services/artifact_versioning.py` with two functions:
+  - `version_existing_artifacts(db, task_id)`: versions old artifacts before re-run
+  - `create_versioned_artifact(db, ...)`: creates new artifact with correct version number
+- Updated all artifact creation sites to use versioning:
+  - `code_execution_agent.py`: replaced delete-and-recreate with version-then-create
+  - `spreadsheet_agent.py`: same pattern
+  - `coding_agent.py`: same pattern
+  - `tasks.py` router run_code endpoint: same pattern
+- Updated `actions.py` delete endpoint to cascade-delete ArtifactVersion rows and files
+- Added `current_version` to ArtifactResponse schema and frontend Artifact type
+- Files changed: `backend/app/models/artifact_version.py` (new), `backend/app/services/artifact_versioning.py` (new), `backend/app/models/artifact.py`, `backend/app/models/__init__.py`, `backend/app/database.py`, `backend/app/schemas/task.py`, `backend/app/routers/actions.py`, `backend/app/routers/tasks.py`, `backend/app/services/agents/code_execution_agent.py`, `backend/app/services/agents/coding_agent.py`, `backend/app/services/agents/spreadsheet_agent.py`, `frontend/src/types/index.ts`
+- **Learnings for future iterations:**
+  - Artifact creation happens in 4 places: code_execution_agent, spreadsheet_agent, coding_agent, and tasks router run_code endpoint
+  - Sub_action_agent copies artifacts by reference (shares storage_path), doesn't need versioning
+  - Centralized versioning helper avoids duplicating version logic across agents
+  - When deleting actions, ArtifactVersion rows must be cleaned up separately (not cascaded from Action)
+---
+
+## 2026-03-02 - US-042
+- Added artifact version API endpoints to `backend/app/routers/artifacts.py`
+- `GET /artifacts/{id}/versions` — lists all versions with version number, size, and timestamp
+- `GET /artifacts/{id}/versions/{version}/content` — serves a specific version's file
+- `GET /artifacts/{id}/diff?v1=N&v2=M` — returns unified diff for text artifacts (text/* or application/json)
+- Diff uses Python `difflib.unified_diff`; returns 400 for non-text artifacts, 404 for missing versions
+- Diff endpoint handles both stored ArtifactVersion rows and the current artifact version
+- Added `ArtifactVersionResponse` Pydantic schema to `backend/app/schemas/task.py`
+- Files changed: `backend/app/routers/artifacts.py`, `backend/app/schemas/task.py`
+- **Learnings for future iterations:**
+  - ArtifactVersion rows only exist for past versions; the current version lives on the Artifact itself — diff endpoint must handle both cases
+  - Text type detection uses mime_type prefix matching (text/, application/json)
+  - `file.read_text(errors="replace")` is safer than strict mode for potentially mixed-encoding artifacts
+---
