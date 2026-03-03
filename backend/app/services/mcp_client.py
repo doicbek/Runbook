@@ -68,6 +68,7 @@ class _ServerHandle:
         self._session_cm: Any = None
         self._read: Any = None
         self._write: Any = None
+        self.timeout_seconds: int = 30
 
 
 class MCPSession:
@@ -84,7 +85,10 @@ class MCPSession:
                 continue
 
             handle = _ServerHandle()
-            env = {**os.environ, **cfg.env} if cfg.env else None
+            handle.timeout_seconds = cfg.timeout_seconds
+            _SENSITIVE_KEYS = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "DATABASE_URL"}
+            safe_env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_KEYS}
+            env = {**safe_env, **cfg.env} if cfg.env else safe_env
 
             server_params = StdioServerParameters(
                 command=cfg.command,
@@ -158,7 +162,10 @@ class MCPSession:
         if log_callback:
             await log_callback("info", f"MCP tool call: {server_name}/{tool_name}")
 
-        result = await handle.session.call_tool(tool_name, arguments)
+        result = await asyncio.wait_for(
+            handle.session.call_tool(tool_name, arguments),
+            timeout=handle.timeout_seconds,
+        )
 
         # Extract text from result content blocks
         texts: list[str] = []

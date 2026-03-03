@@ -17,8 +17,8 @@ export function PauseButton({
     setIsPausing(true);
     try {
       await pauseTask(actionId, taskId);
-    } catch {
-      // SSE will update status; ignore errors silently
+    } catch (e) {
+      console.error("Failed to pause task:", e);
     } finally {
       setIsPausing(false);
     }
@@ -59,8 +59,8 @@ export function PauseGuidancePanel({
       });
       setGuidance("");
       setIsRedirect(false);
-    } catch {
-      // SSE will update status
+    } catch (e) {
+      console.error("Failed to resume task:", e);
     } finally {
       setIsSubmitting(false);
     }

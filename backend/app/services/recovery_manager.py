@@ -330,11 +330,17 @@ async def full_replan(action_id: str, failed_info: list[str]) -> bool:
         action = result.scalar_one()
         root_prompt = action.root_prompt
 
-        # Delete all existing tasks for this action
+        # Only delete failed tasks; reset pending tasks; keep completed tasks
         res = await db.execute(select(Task).where(Task.action_id == action_id))
-        for t in res.scalars().all():
-            await db.delete(t)
+        existing_tasks = list(res.scalars().all())
+        completed_tasks = [t for t in existing_tasks if t.status == "completed"]
+        for t in existing_tasks:
+            if t.status != "completed":
+                await db.delete(t)
         await db.flush()
+
+        # Get IDs of preserved completed tasks
+        completed_ids = {t.id for t in completed_tasks}
 
         # Enhance the prompt with context about what failed so the planner can avoid it
         enhanced_prompt = root_prompt

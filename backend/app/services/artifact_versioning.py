@@ -1,5 +1,6 @@
 """Artifact versioning: when a task re-runs, old artifacts are versioned instead of deleted."""
 
+import asyncio
 import logging
 import os
 import shutil
@@ -48,7 +49,7 @@ async def version_existing_artifacts(db: AsyncSession, task_id: str) -> None:
         version_path = version_dir / src.name
 
         try:
-            shutil.copy2(str(src), str(version_path))
+            await asyncio.to_thread(shutil.copy2, str(src), str(version_path))
         except OSError:
             logger.warning("Failed to copy artifact %s to version path", artifact.id, exc_info=True)
             await db.delete(artifact)

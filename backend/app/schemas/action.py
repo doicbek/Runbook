@@ -1,12 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.task import TaskResponse
 
 
 class ActionCreate(BaseModel):
-    root_prompt: str
+    root_prompt: str = Field(..., min_length=1, max_length=50000)
     title: str | None = None
 
 

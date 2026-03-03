@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +16,10 @@ from app.models.action_template import ActionTemplate
 from app.schemas.action import ActionResponse
 
 router = APIRouter(prefix="/templates", tags=["templates"])
+
+
+def _escape_like(s: str) -> str:
+    return re.sub(r'([%_\\])', r'\\\1', s)
 
 
 # --- Pydantic schemas ---
@@ -79,7 +84,7 @@ async def list_templates(
     query = select(ActionTemplate).order_by(ActionTemplate.updated_at.desc())
 
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{_escape_like(search)}%"
         query = query.where(
             (ActionTemplate.title.ilike(pattern)) | (ActionTemplate.description.ilike(pattern))
         )

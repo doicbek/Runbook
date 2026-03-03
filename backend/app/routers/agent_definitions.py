@@ -193,7 +193,9 @@ async def test_mcp_connection(agent_id: str, db: AsyncSession = Depends(get_db))
             "tool_count": len(tools),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"MCP connection failed: {e}")
+        import logging as _logging
+        _logging.getLogger(__name__).exception("MCP connection test failed")
+        raise HTTPException(status_code=500, detail="MCP connection failed")
     finally:
         await session.close()
 

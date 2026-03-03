@@ -21,8 +21,10 @@ export default function ActionWorkspacePage({
     const store = useActionStore.getState();
     store.resetForAction(id);
     return () => {
-      // Clean up when leaving this action page
-      useActionStore.getState().resetForAction("");
+      // Clean up when leaving this action page — only if still viewing this action
+      if (useActionStore.getState().currentActionId === id) {
+        useActionStore.getState().resetForAction("");
+      }
     };
   }, [id]);
 

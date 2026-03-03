@@ -110,6 +110,18 @@ async def _execute_dag(action_id: str):
                     return
 
                 if not failed_tasks:
+                    # Tasks are still pending/paused but none running — action is stalled, not failed
+                    pending_tasks = [t for t in all_tasks if t.status in ("pending", "paused")]
+                    if pending_tasks:
+                        # Tasks exist that could still run — don't mark as failed
+                        logger.info(
+                            f"[Executor] Action {action_id} has {len(pending_tasks)} pending/paused tasks "
+                            f"but no failures — stopping DAG pass (may need manual resume)"
+                        )
+                        action.status = "draft"
+                        await db.commit()
+                        return
+                    # Truly stuck — no failed, no pending, no running, but not all completed
                     action.status = "failed"
                     await db.commit()
                     return
@@ -243,23 +255,35 @@ async def _compress_for_handoff(raw_output: str) -> str:
 
 async def _gather_dep_outputs(dependency_ids: list[str]) -> dict[str, str]:
     """Collect dependency outputs (text + artifact URLs) for a task."""
+    if not dependency_ids:
+        return {}
     dep_outputs: dict[str, str] = {}
+    from app.config import settings
+    base_url = getattr(settings, "BASE_URL", "http://localhost:8001")
     async with async_session() as db:
+        # Batch query: all outputs for dependencies
+        result = await db.execute(
+            select(TaskOutput).where(TaskOutput.task_id.in_(dependency_ids))
+        )
+        outputs_by_task = {o.task_id: o for o in result.scalars().all()}
+
+        # Batch query: all artifacts for dependencies
+        art_result = await db.execute(
+            select(Artifact).where(Artifact.task_id.in_(dependency_ids))
+        )
+        artifacts_by_task: dict[str, list] = {}
+        for art in art_result.scalars().all():
+            artifacts_by_task.setdefault(art.task_id, []).append(art)
+
         for dep_id in dependency_ids:
-            result = await db.execute(
-                select(TaskOutput).where(TaskOutput.task_id == dep_id)
-            )
-            output = result.scalar_one_or_none()
+            output = outputs_by_task.get(dep_id)
             if output:
                 text = output.text or ""
-                art_result = await db.execute(
-                    select(Artifact).where(Artifact.task_id == dep_id)
-                )
-                artifacts = list(art_result.scalars().all())
+                artifacts = artifacts_by_task.get(dep_id, [])
                 if artifacts:
                     text += "\n\n**Artifacts from this task:**\n"
                     for art in artifacts:
-                        url = f"http://localhost:8001/artifacts/{art.id}/content"
+                        url = f"{base_url}/artifacts/{art.id}/content"
                         if art.mime_type and art.mime_type.startswith("image/"):
                             text += f"![{art.type}]({url})\n"
                         else:
@@ -360,8 +384,14 @@ async def _run_task(
         return
 
     except InputUnavailableError as e:
-        logger.info(f"Task {task_id} input unavailable: {e}")
-        first_error = str(e)
+        logger.info(f"Task {task_id} input unavailable: {e} — resetting to pending")
+        async with async_session() as db:
+            task_result = await db.execute(select(Task).where(Task.id == task_id))
+            task = task_result.scalar_one()
+            task.status = "pending"
+            task.output_summary = None
+            await db.commit()
+        return
 
     except Exception as e:
         logger.exception(f"Task {task_id} failed")

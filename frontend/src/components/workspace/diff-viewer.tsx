@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import DOMPurify from "dompurify";
 import { html as diff2html } from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import "diff2html/bundles/css/diff2html.min.css";
@@ -68,7 +69,7 @@ export function DiffViewer({ filePath, diff }: DiffViewerProps) {
       )}
       <div
         className="text-[10px] max-h-[300px] overflow-auto"
-        dangerouslySetInnerHTML={{ __html: htmlContent }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(htmlContent) }}
       />
       <style jsx global>{`
         .diff-viewer-wrapper .d2h-wrapper {

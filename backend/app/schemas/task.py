@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TaskCreate(BaseModel):
-    prompt: str
+    prompt: str = Field(..., min_length=1)
     agent_type: str = "general"
     model: str | None = None
     dependencies: list[str] = []
@@ -15,7 +15,7 @@ class TaskUpdate(BaseModel):
     model: str | None = None
     agent_type: str | None = None
     dependencies: list[str] | None = None
-    timeout_seconds: int | None = None
+    timeout_seconds: int | None = Field(None, ge=1)
 
 
 class TaskResponse(BaseModel):
@@ -29,7 +29,6 @@ class TaskResponse(BaseModel):
     output_summary: str | None = None
     timeout_seconds: int | None = None
     sub_action_id: str | None = None
-    workspace_path: str | None = None
     workspace_branch: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -53,7 +52,7 @@ class ArtifactResponse(BaseModel):
     action_id: str
     type: str
     mime_type: str | None = None
-    storage_path: str | None = None
+    url: str | None = None
     size_bytes: int | None = None
     current_version: int = 1
     created_at: datetime

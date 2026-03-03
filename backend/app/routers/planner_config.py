@@ -177,4 +177,5 @@ async def modify_system_prompt(
         ], max_tokens=4096)
         return ModifyPromptResponse(system_prompt=result.strip())
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.exception("Failed to modify system prompt")
+        raise HTTPException(status_code=500, detail="Internal server error") from e

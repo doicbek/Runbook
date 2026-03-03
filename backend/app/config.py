@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     ARXIV_MAX_RESULTS: int = 10
     ARXIV_RAG_TOP_K: int = 5
     ITERATION_RETENTION_DAYS: int = 30
+    BASE_URL: str = "http://localhost:8001"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

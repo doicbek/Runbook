@@ -172,7 +172,7 @@ export default function SchedulesPage() {
                         body: { is_active: !schedule.is_active },
                       })
                     }
-                    isRunning={runNow.isPending}
+                    isRunning={runNow.isPending && runNow.variables === schedule.id}
                   />
                 )}
               </div>

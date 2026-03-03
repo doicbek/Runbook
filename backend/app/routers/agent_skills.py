@@ -126,18 +126,13 @@ async def delete_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
     skill = result.scalar_one_or_none()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    # Also clean up any relations referencing this skill
+    # Bulk delete any relations referencing this skill
+    from sqlalchemy import delete as sa_delete
     await db.execute(
-        select(SkillRelation).where(
+        sa_delete(SkillRelation).where(
             or_(SkillRelation.from_id == skill_id, SkillRelation.to_id == skill_id)
         )
     )
-    for rel in (await db.execute(
-        select(SkillRelation).where(
-            or_(SkillRelation.from_id == skill_id, SkillRelation.to_id == skill_id)
-        )
-    )).scalars().all():
-        await db.delete(rel)
     await db.delete(skill)
     await db.commit()
 
@@ -184,18 +179,23 @@ async def list_concepts(
 
 @router.post("/ontology/concepts", status_code=201)
 async def create_concept(body: ConceptCreate, db: AsyncSession = Depends(get_db)):
-    # Upsert: if concept with same name exists, return it
+    # Upsert: if concept with same name exists, return it with 200
     result = await db.execute(
         select(SkillConcept).where(SkillConcept.name == body.name)
     )
     existing = result.scalar_one_or_none()
     if existing:
-        return {
-            "id": existing.id, "name": existing.name,
-            "concept_type": existing.concept_type,
-            "description": existing.description,
-            "created_at": existing.created_at.isoformat() if existing.created_at else None,
-        }
+        from starlette.responses import JSONResponse
+        return JSONResponse(
+            status_code=200,
+            content={
+                "id": existing.id, "name": existing.name,
+                "concept_type": existing.concept_type,
+                "description": existing.description,
+                "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                "note": "Concept already exists",
+            },
+        )
 
     concept = SkillConcept(
         name=body.name,

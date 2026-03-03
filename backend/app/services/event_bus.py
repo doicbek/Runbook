@@ -59,7 +59,7 @@ class EventBus:
             if queue.qsize() > QUEUE_HIGH_WATERMARK:
                 logger.warning(
                     f"Queue depth {queue.qsize()}/{QUEUE_MAX_SIZE} for action {action_id} "
-                    f"exceeds 80%% capacity"
+                    f"exceeds 80% capacity"
                 )
 
     def replay_from(self, action_id: str, last_event_id: int) -> list[dict[str, Any]]:

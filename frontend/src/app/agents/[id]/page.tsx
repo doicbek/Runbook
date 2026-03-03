@@ -132,8 +132,12 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleDelete = async () => {
     if (!confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) return;
-    await deleteAgent.mutateAsync(agent.id);
-    router.push("/agents");
+    try {
+      await deleteAgent.mutateAsync(agent.id);
+      router.push("/agents");
+    } catch (e) {
+      console.error("Failed to delete agent:", e);
+    }
   };
 
   const codeHelperText = (() => {

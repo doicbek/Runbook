@@ -13,19 +13,20 @@ class Action(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String(255), default="Untitled Action")
     root_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft, running, completed, failed
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft, running, completed, failed
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
     )
 
-    parent_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parent_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     parent_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     output_contract: Mapped[str | None] = mapped_column(Text, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, default=0)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    forked_from_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    forked_from_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="action", cascade="all, delete-orphan")  # noqa: F821

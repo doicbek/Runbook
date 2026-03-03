@@ -49,6 +49,11 @@ export default function HomePage() {
           >
             {createAction.isPending ? "Creating..." : "Create Action"}
           </Button>
+          {createAction.isError && (
+            <p className="text-sm text-destructive mt-2">
+              Failed to create action: {(createAction.error as Error)?.message ?? "Unknown error"}
+            </p>
+          )}
         </form>
       </div>
     </div>

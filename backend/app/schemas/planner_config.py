@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AvailableModel(BaseModel):
@@ -24,8 +24,8 @@ class PlannerConfigResponse(BaseModel):
 class PlannerConfigUpdate(BaseModel):
     system_prompt: str | None = None
     model: str | None = None
-    max_tasks: int | None = None
-    max_retries: int | None = None
+    max_tasks: int | None = Field(None, ge=1, le=50)
+    max_retries: int | None = Field(None, ge=0, le=10)
 
 
 class PlannerPreviewRequest(BaseModel):

@@ -204,6 +204,22 @@ async def grep_search(
     return results
 
 
+_BLOCKED_COMMANDS = {"rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:", "fork bomb"}
+_BLOCKED_PATTERNS = [
+    r"\bcurl\b.*\|.*\bsh\b",  # curl | sh
+    r"\bwget\b.*\|.*\bsh\b",  # wget | sh
+    r"\bnc\b.*-[el]",         # netcat listeners
+    r"\bchmod\b.*777\s*/",    # chmod 777 on root
+    r"\benv\b\s*$",           # bare env (leaks secrets)
+    r"cat\s+/etc/(passwd|shadow)",
+    r"\$[({].*API_KEY",       # accessing API keys
+    r"os\.environ",           # accessing env vars
+]
+
+# Sensitive environment variables to strip from subprocess environments
+_BASH_SENSITIVE_ENV_VARS = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "DATABASE_URL"}
+
+
 async def bash_run(
     command: str,
     workspace: str,
@@ -219,9 +235,24 @@ async def bash_run(
     Returns:
         Dict with 'stdout', 'stderr', 'exit_code' keys.
     """
+    import re as _re
+
+    # Check against blocked commands
+    for blocked in _BLOCKED_COMMANDS:
+        if blocked in command:
+            return {"stdout": "", "stderr": f"Command blocked by security policy: matches restricted command", "exit_code": -1}
+
+    # Check against blocked patterns
+    for pattern in _BLOCKED_PATTERNS:
+        if _re.search(pattern, command, _re.IGNORECASE):
+            return {"stdout": "", "stderr": f"Command blocked by security policy: matches restricted pattern", "exit_code": -1}
+
     workspace_path = Path(workspace).resolve()
     if not workspace_path.is_dir():
         raise ValueError(f"Workspace directory does not exist: {workspace}")
+
+    # Build a clean env that strips secrets
+    clean_env = {k: v for k, v in os.environ.items() if k not in _BASH_SENSITIVE_ENV_VARS}
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -229,6 +260,7 @@ async def bash_run(
             cwd=str(workspace_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=clean_env,
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout

@@ -2,8 +2,9 @@ import asyncio
 import json
 import os
 import logging
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,6 +19,10 @@ from app.services.event_bus import event_bus
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/actions", tags=["actions"])
+
+
+def _escape_like(s: str) -> str:
+    return re.sub(r'([%_\\])', r'\\\1', s)
 
 
 async def _generate_title(prompt: str) -> str:
@@ -76,7 +81,7 @@ async def list_actions(
     status: str | None = None,
     search: str | None = None,
     cursor: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     task_count_col = func.count(Task.id).label("task_count")
@@ -91,7 +96,7 @@ async def list_actions(
         query = query.where(Action.status == status)
 
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{_escape_like(search)}%"
         query = query.where(
             (Action.title.ilike(pattern)) | (Action.root_prompt.ilike(pattern))
         )

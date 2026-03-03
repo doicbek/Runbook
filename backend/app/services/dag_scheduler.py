@@ -6,6 +6,7 @@ and collecting downstream task IDs.
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select
@@ -34,10 +35,10 @@ async def invalidate_downstream(
             dependents.setdefault(dep_id, []).append(t.id)
 
     # BFS from task_id
-    queue = list(dependents.get(task_id, []))
+    queue = deque(dependents.get(task_id, []))
     visited: set[str] = set()
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in visited:
             continue
         visited.add(current)
@@ -75,7 +76,14 @@ async def run_dag_pass(
             (action_id, task_id, prompt, agent_type, dependencies, model, timeout_seconds)
             that executes a single task.
     """
+    _MAX_DAG_ITERATIONS = 500
+    iteration_count = 0
     while True:
+        iteration_count += 1
+        if iteration_count > _MAX_DAG_ITERATIONS:
+            logger.error(f"DAG scheduler exceeded {_MAX_DAG_ITERATIONS} iterations for action {action_id}")
+            break
+
         async with async_session() as db:
             result = await db.execute(
                 select(Task).where(Task.action_id == action_id)
@@ -87,6 +95,7 @@ async def run_dag_pass(
             running_ids = {t.id for t in all_tasks if t.status == "running"}
 
             ready = []
+            dep_failed_tasks = []
             for t in all_tasks:
                 if t.status == "pending":
                     deps_met = all(d in completed_ids for d in t.dependencies)
@@ -94,14 +103,18 @@ async def run_dag_pass(
                     if deps_failed:
                         t.status = "failed"
                         t.output_summary = "Dependency failed"
-                        await db.commit()
-                        await event_bus.publish(action_id, "task.failed", {
-                            "task_id": t.id,
-                            "error": "Dependency failed",
-                            "output_summary": "Dependency failed",
-                        })
+                        dep_failed_tasks.append(t)
                     elif deps_met:
                         ready.append(t)
+
+            if dep_failed_tasks:
+                await db.commit()
+                for t in dep_failed_tasks:
+                    await event_bus.publish(action_id, "task.failed", {
+                        "task_id": t.id,
+                        "error": "Dependency failed",
+                        "output_summary": "Dependency failed",
+                    })
 
             if not ready and not running_ids:
                 break
@@ -124,9 +137,9 @@ async def run_dag_pass(
 def collect_downstream(task_id: str, dependents: dict[str, list[str]]) -> set[str]:
     """BFS to collect all transitively downstream task IDs."""
     visited: set[str] = set()
-    queue = list(dependents.get(task_id, []))
+    queue = deque(dependents.get(task_id, []))
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in visited:
             continue
         visited.add(current)

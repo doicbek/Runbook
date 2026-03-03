@@ -171,7 +171,7 @@ export default function TemplatesPage() {
                     onUse={() => handleUse(template.id)}
                     onEdit={() => setEditingId(template.id)}
                     onDelete={() => setDeleteConfirmId(template.id)}
-                    isUsing={useTemplate.isPending}
+                    isUsing={useTemplate.isPending && useTemplate.variables === template.id}
                   />
                 )}
               </div>

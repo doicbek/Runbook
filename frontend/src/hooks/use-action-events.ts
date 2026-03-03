@@ -6,6 +6,13 @@ import { createSSEConnection, type SSEConnection } from "@/lib/sse";
 import { useActionStore } from "@/stores/action-store";
 import type { AgentIteration, Task } from "@/types";
 
+function safeString(val: unknown): string | undefined {
+  return typeof val === "string" ? val : undefined;
+}
+function safeNumber(val: unknown): number | undefined {
+  return typeof val === "number" ? val : undefined;
+}
+
 export function useActionEvents(actionId: string, enabled = true) {
   const queryClientRef = useRef(useQueryClient());
   const connectionRef = useRef<SSEConnection | null>(null);
@@ -44,26 +51,35 @@ export function useActionEvents(actionId: string, enabled = true) {
             }
             break;
           }
-          case "task.started":
-            setTaskOverride(data.task_id as string, { status: "running" });
+          case "task.started": {
+            const taskId = safeString(data.task_id);
+            if (!taskId) break;
+            setTaskOverride(taskId, { status: "running" });
             break;
-          case "task.completed":
-            setTaskOverride(data.task_id as string, {
+          }
+          case "task.completed": {
+            const taskId = safeString(data.task_id);
+            if (!taskId) break;
+            setTaskOverride(taskId, {
               status: "completed",
-              output_summary: data.output_summary as string,
+              output_summary: safeString(data.output_summary) ?? null,
             });
             // Refetch to get the persisted output
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             break;
-          case "task.failed":
-            setTaskOverride(data.task_id as string, {
+          }
+          case "task.failed": {
+            const taskId = safeString(data.task_id);
+            if (!taskId) break;
+            setTaskOverride(taskId, {
               status: "failed",
-              output_summary: (data.output_summary as string) || (data.error as string),
+              output_summary: safeString(data.output_summary) || safeString(data.error) || null,
             });
             if (data.timeout) {
-              setTaskTimedOut(data.task_id as string, true);
+              setTaskTimedOut(taskId, true);
             }
             break;
+          }
           case "task.recovering":
             // Task is attempting inline recovery — keep it as "running"
             // so the UI shows the live activity feed with recovery logs
@@ -72,12 +88,16 @@ export function useActionEvents(actionId: string, enabled = true) {
               message: `Recovery attempt ${data.attempt}/${data.max_attempts}: ${(data.error as string) || "retrying..."}`,
             });
             break;
-          case "log.append":
-            appendTaskLog(data.task_id as string, {
-              level: data.level as string,
-              message: data.message as string,
+          case "log.append": {
+            const taskId = safeString(data.task_id);
+            const message = safeString(data.message);
+            if (!taskId || !message) break;
+            appendTaskLog(taskId, {
+              level: safeString(data.level) || "info",
+              message,
             });
             break;
+          }
           case "action.completed":
             setActionStatus("completed");
             setRecoveryAttempt(null);
@@ -95,13 +115,19 @@ export function useActionEvents(actionId: string, enabled = true) {
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             queryClient.invalidateQueries({ queryKey: ["actions"] });
             break;
-          case "action.replanning":
+          case "action.replanning": {
+            const savedCost = useActionStore.getState().actionCost;
+            const savedCostByTask = useActionStore.getState().costByTask;
+            const savedCostByModel = useActionStore.getState().costByModel;
             setActionStatus("running");
             setRecoveryAttempt(null);
             setReplanning(true);
             clearTaskState();
+            // Restore cost data after clear
+            useActionStore.setState({ actionCost: savedCost, costByTask: savedCostByTask, costByModel: savedCostByModel });
             queryClient.invalidateQueries({ queryKey: ["action", actionId] });
             break;
+          }
           case "action.started":
             setActionStatus("running");
             break;
@@ -246,12 +272,18 @@ export function useActionEvents(actionId: string, enabled = true) {
             break;
 
           // --- Pause/resume events ---
-          case "task.paused":
-            setTaskOverride(data.task_id as string, { status: "paused" });
+          case "task.paused": {
+            const taskId = safeString(data.task_id);
+            if (!taskId) break;
+            setTaskOverride(taskId, { status: "paused" });
             break;
-          case "task.resumed":
-            setTaskOverride(data.task_id as string, { status: "running" });
+          }
+          case "task.resumed": {
+            const taskId = safeString(data.task_id);
+            if (!taskId) break;
+            setTaskOverride(taskId, { status: "running" });
             break;
+          }
           case "task.user_guidance":
             appendTaskLog(data.task_id as string, {
               level: "info",
@@ -260,14 +292,18 @@ export function useActionEvents(actionId: string, enabled = true) {
             break;
 
           // --- Cost tracking ---
-          case "cost.update":
+          case "cost.update": {
+            const totalCost = safeNumber(data.total_cost_usd);
+            const costUsd = safeNumber(data.cost_usd);
+            if (totalCost === undefined || costUsd === undefined) break;
             updateCost(
-              data.total_cost_usd as number,
-              (data.task_id as string) || null,
-              (data.model as string) || null,
-              data.cost_usd as number
+              totalCost,
+              safeString(data.task_id) || null,
+              safeString(data.model) || null,
+              costUsd
             );
             break;
+          }
 
           // --- Streaming LLM output ---
           case "task.llm_chunk":

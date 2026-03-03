@@ -1,3 +1,5 @@
+import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +15,19 @@ from app.services.event_bus import event_bus
 from app.services.pause_manager import pause_manager
 
 router = APIRouter(tags=["tasks"])
+
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_MAX = 10  # max requests
+_RATE_LIMIT_WINDOW = 60  # per 60 seconds
+
+
+def _check_rate_limit(key: str = "global") -> bool:
+    now = time.time()
+    _rate_limit_store[key] = [t for t in _rate_limit_store[key] if now - t < _RATE_LIMIT_WINDOW]
+    if len(_rate_limit_store[key]) >= _RATE_LIMIT_MAX:
+        return False
+    _rate_limit_store[key].append(now)
+    return True
 
 
 class RunCodeRequest(BaseModel):
@@ -258,6 +273,12 @@ async def run_task_code(
     db: AsyncSession = Depends(get_db),
 ):
     """Execute Python code from a task's output or from the request body."""
+    if not _check_rate_limit("run_code"):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: max {_RATE_LIMIT_MAX} code executions per {_RATE_LIMIT_WINDOW} seconds",
+        )
+
     from app.services.code_runner import extract_code_blocks, run_code
 
     # Verify task exists and belongs to action

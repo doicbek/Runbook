@@ -13,7 +13,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/tools")
 async def get_tool_analytics(
     agent_type: str | None = Query(None),
-    days: int | None = Query(None, description="Filter to last N days"),
+    days: int | None = Query(None, ge=1, le=365, description="Filter to last N days"),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate tool usage stats, optionally filtered by agent_type and time range."""
@@ -59,7 +59,7 @@ async def get_tool_analytics(
 @router.get("/agents/{agent_type}/tools")
 async def get_agent_tool_analytics(
     agent_type: str,
-    days: int | None = Query(None, description="Filter to last N days"),
+    days: int | None = Query(None, ge=1, le=365, description="Filter to last N days"),
     db: AsyncSession = Depends(get_db),
 ):
     """Tool usage breakdown for a specific agent type."""

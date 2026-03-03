@@ -137,6 +137,26 @@ _STDLIB_MODULES = {
 }
 
 
+_ALLOWED_PACKAGES = set(_PIP_NAME_MAP.values()) | {
+    "numpy", "pandas", "matplotlib", "scipy", "seaborn", "plotly",
+    "requests", "beautifulsoup4", "lxml", "openpyxl", "xlsxwriter",
+    "pillow", "scikit-learn", "sympy", "networkx",
+}
+
+
+def _validate_packages(packages: list[str]) -> tuple[list[str], list[str]]:
+    """Filter packages to only those in the allowlist."""
+    normalized_allowlist = {a.lower().replace("-", "_") for a in _ALLOWED_PACKAGES} | {a.lower() for a in _ALLOWED_PACKAGES}
+    allowed = []
+    blocked = []
+    for p in packages:
+        if p.lower().replace("-", "_") in normalized_allowlist or p.lower() in normalized_allowlist:
+            allowed.append(p)
+        else:
+            blocked.append(p)
+    return allowed, blocked
+
+
 def _prescan_imports(code: str) -> list[str]:
     """Pre-scan code for imports and # pip: hints. Return pip packages to install."""
     packages: list[str] = []
@@ -166,14 +186,10 @@ def _prescan_imports(code: str) -> list[str]:
 
 def _is_installed(package: str) -> bool:
     """Check if a package is already importable."""
-    # Map pip names back to import names for checking
+    import importlib.util
     reverse_map = {v: k for k, v in _PIP_NAME_MAP.items()}
     import_name = reverse_map.get(package, package).replace("-", "_")
-    try:
-        __import__(import_name)
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec(import_name) is not None
 
 
 async def _install_packages(
@@ -279,6 +295,15 @@ def _detect_artifact_type(mime_type: str) -> str:
     return "file"
 
 
+# Sensitive environment variables to strip from subprocess environments
+_SENSITIVE_ENV_VARS = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "DATABASE_URL"}
+
+
+def _clean_env() -> dict[str, str]:
+    """Build a clean environment that strips sensitive variables."""
+    return {k: v for k, v in os.environ.items() if k not in _SENSITIVE_ENV_VARS}
+
+
 async def _run_script(
     script_path: Path,
     work_dir: Path,
@@ -287,12 +312,29 @@ async def _run_script(
 ) -> tuple[str, str, int]:
     """Execute script_path in a subprocess. Returns (stdout, stderr, exit_code)."""
     try:
+        clean_env = _clean_env()
+        # On Linux, apply resource limits to sandbox the subprocess
+        preexec = None
+        if sys.platform == "linux":
+            import resource
+
+            def _set_limits():
+                # Limit CPU time to timeout + 10s grace
+                resource.setrlimit(resource.RLIMIT_CPU, (timeout + 10, timeout + 10))
+                # Limit virtual memory to 2GB
+                resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
+                # Limit number of child processes to 64
+                resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+
+            preexec = _set_limits
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             str(script_path),
             cwd=str(work_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=clean_env,
+            **({"preexec_fn": preexec} if preexec else {}),
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -350,6 +392,9 @@ async def run_code(
     """
     # Create work directory for this execution
     work_dir = ARTIFACTS_DIR / action_id / task_id
+    # Validate path is within ARTIFACTS_DIR to prevent traversal
+    if not str(work_dir.resolve()).startswith(str(ARTIFACTS_DIR.resolve())):
+        raise ValueError(f"Invalid work directory: path traversal detected")
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # Clean up old generated files from previous runs
@@ -369,9 +414,13 @@ async def run_code(
     prescanned = _prescan_imports(code)
     to_install = [p for p in prescanned if not _is_installed(p)]
     if to_install:
-        if log_callback:
-            await log_callback("info", f"Pre-installing {len(to_install)} package(s): {', '.join(to_install)}")
-        await _install_packages(to_install, log_callback)
+        to_install, blocked = _validate_packages(to_install)
+        if blocked and log_callback:
+            await log_callback("warn", f"Blocked packages not in allowlist: {', '.join(blocked)}")
+        if to_install:
+            if log_callback:
+                await log_callback("info", f"Pre-installing {len(to_install)} package(s): {', '.join(to_install)}")
+            await _install_packages(to_install, log_callback)
 
     stdout, stderr, exit_code = await _run_script(script_path, work_dir, timeout, log_callback)
 
@@ -384,6 +433,12 @@ async def run_code(
         missing = _extract_missing_modules(stderr)
         # Filter out packages we already tried
         new_missing = [p for p in missing if p not in already_installed]
+        if not new_missing:
+            break
+        # Validate packages against allowlist
+        new_missing, blocked = _validate_packages(new_missing)
+        if blocked and log_callback:
+            await log_callback("warn", f"Blocked packages not in allowlist: {', '.join(blocked)}")
         if not new_missing:
             break
         already_installed.update(new_missing)

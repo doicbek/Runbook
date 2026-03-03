@@ -132,23 +132,23 @@ async def _get_skills_context(db: AsyncSession) -> str:
         return ""
 
 
-async def _load_planner_config(db: AsyncSession) -> tuple[str, str, int]:
-    """Returns (system_prompt, model, max_retries) from DB config, falling back to defaults."""
+async def _load_planner_config(db: AsyncSession) -> tuple[str, str, int, int | None]:
+    """Returns (system_prompt, model, max_retries, max_tasks) from DB config, falling back to defaults."""
     try:
         from sqlalchemy import select
         from app.models.planner_config import PlannerConfig
         result = await db.execute(select(PlannerConfig).where(PlannerConfig.id == "default"))
         cfg = result.scalar_one_or_none()
         if cfg:
-            return cfg.system_prompt, cfg.model, cfg.max_retries
+            return cfg.system_prompt, cfg.model, cfg.max_retries, getattr(cfg, "max_tasks", None)
     except Exception:
         logger.exception("Failed to load planner config from DB, using defaults")
-    return SYSTEM_PROMPT, "anthropic/claude-opus-4-6", 2
+    return SYSTEM_PROMPT, "anthropic/claude-opus-4-6", 2, None
 
 
 async def plan_tasks(root_prompt: str, action_id: str, db: AsyncSession) -> list[Task]:
     """Use LLM (with tool_use for structured output) to decompose a prompt into tasks."""
-    system_prompt_base, model_override, max_retries = await _load_planner_config(db)
+    system_prompt_base, model_override, max_retries, max_tasks = await _load_planner_config(db)
     custom_agent_context = await _get_custom_agent_context(db)
     skills_context = await _get_skills_context(db)
     system_prompt = system_prompt_base + custom_agent_context + skills_context
@@ -178,6 +178,9 @@ async def plan_tasks(root_prompt: str, action_id: str, db: AsyncSession) -> list
                 tasks=[PlannerTask(**t) for t in tasks_data]
             )
             logger.info(f"[Planner LLM Output] {len(parsed.tasks)} tasks: {[t.prompt[:60] for t in parsed.tasks]}")
+            if max_tasks and len(parsed.tasks) > max_tasks:
+                logger.info(f"[Planner] Truncating {len(parsed.tasks)} tasks to max_tasks={max_tasks}")
+                parsed.tasks = parsed.tasks[:max_tasks]
             if _validate_dag(parsed):
                 return _convert_to_models(parsed, action_id)
             logger.warning(f"Invalid DAG on attempt {attempt + 1}, retrying")

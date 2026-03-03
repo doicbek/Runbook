@@ -92,10 +92,9 @@ export function TaskCard({
   const [editing, setEditing] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [outputExpanded, setOutputExpanded] = useState(false);
-  const taskOverrides = useActionStore((s) => s.taskOverrides);
+  const override = useActionStore((s) => s.taskOverrides[task.id]);
   const codeExecution = useActionStore((s) => s.codeExecutions[task.id]);
   const timedOut = useActionStore((s) => s.taskTimedOut[task.id]);
-  const override = taskOverrides[task.id];
   const runCode = useRunCode();
 
   const status = override?.status || task.status;

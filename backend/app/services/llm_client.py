@@ -389,6 +389,9 @@ async def chat_completion_with_tool(
     """
     import json as _json
 
+    action_id = kwargs.pop("action_id", None)
+    task_id = kwargs.pop("task_id", None)
+
     config = MODEL_REGISTRY.get(model)
     if not config:
         raise ValueError(f"Unknown model: {model}. Available: {list(MODEL_REGISTRY.keys())}")
@@ -400,9 +403,9 @@ async def chat_completion_with_tool(
     logger.info(f"Using model (tool call): {model}")
 
     if config.provider == "anthropic":
-        return await _anthropic_tool_call(config, api_key, messages, tool_name, tool_schema, **kwargs)
+        return await _anthropic_tool_call(config, api_key, messages, tool_name, tool_schema, action_id=action_id, task_id=task_id, **kwargs)
     else:
-        return await _openai_tool_call(config, api_key, messages, tool_name, tool_schema, **kwargs)
+        return await _openai_tool_call(config, api_key, messages, tool_name, tool_schema, action_id=action_id, task_id=task_id, **kwargs)
 
 
 async def _anthropic_tool_call(
@@ -411,12 +414,14 @@ async def _anthropic_tool_call(
     messages: list[dict],
     tool_name: str,
     tool_schema: dict,
+    action_id: str | None = None,
+    task_id: str | None = None,
     **kwargs,
 ) -> dict | None:
     """Anthropic tool_use: define a tool and force the model to call it."""
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(api_key=api_key)
+    client = AsyncAnthropic(api_key=api_key, timeout=90.0)
 
     system_text = ""
     filtered_messages = []
@@ -448,6 +453,15 @@ async def _anthropic_tool_call(
 
     response = await client.messages.create(**anthropic_kwargs)
 
+    if response.usage:
+        asyncio.create_task(_record_llm_usage(
+            model=f"anthropic/{config.model_id}",
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            action_id=action_id,
+            task_id=task_id,
+        ))
+
     for block in response.content:
         if block.type == "tool_use" and block.name == tool_name:
             return block.input  # type: ignore[return-value]
@@ -460,6 +474,8 @@ async def _openai_tool_call(
     messages: list[dict],
     tool_name: str,
     tool_schema: dict,
+    action_id: str | None = None,
+    task_id: str | None = None,
     **kwargs,
 ) -> dict | None:
     """OpenAI-compatible tool call: define a function tool and force the model to call it."""
@@ -475,7 +491,7 @@ async def _openai_tool_call(
             kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
         kwargs.pop("temperature", None)
 
-    client = AsyncOpenAI(**client_kwargs)
+    client = AsyncOpenAI(**client_kwargs, timeout=90.0)
     response = await client.chat.completions.create(
         model=config.model_id,
         messages=messages,
@@ -492,6 +508,16 @@ async def _openai_tool_call(
         tool_choice={"type": "function", "function": {"name": tool_name}},
         **kwargs,
     )
+
+    if response.usage:
+        asyncio.create_task(_record_llm_usage(
+            model=f"{config.provider}/{config.model_id}",
+            input_tokens=response.usage.prompt_tokens or 0,
+            output_tokens=response.usage.completion_tokens or 0,
+            action_id=action_id,
+            task_id=task_id,
+        ))
+
     msg = response.choices[0].message
     if msg.tool_calls:
         return _json.loads(msg.tool_calls[0].function.arguments)
@@ -515,7 +541,7 @@ async def utility_completion(messages: list[dict], **kwargs) -> str:
             logger.debug(f"utility_completion: skipping {model} (no API key)")
             continue
         try:
-            return await chat_completion(model, messages, **kwargs)
+            return await chat_completion(model, messages, **dict(kwargs))
         except Exception as exc:
             logger.warning(f"utility_completion: {model} failed: {exc}")
             last_exc = exc
@@ -554,7 +580,7 @@ async def planner_completion(
             logger.debug(f"planner_completion: skipping {model} (no API key)")
             continue
         try:
-            result = await chat_completion_with_tool(model, messages, tool_name, tool_schema, **kwargs)
+            result = await chat_completion_with_tool(model, messages, tool_name, tool_schema, **dict(kwargs))
             return result
         except Exception as exc:
             logger.warning(f"planner_completion: {model} failed: {exc}")
@@ -593,7 +619,7 @@ async def _openai_compatible_completion(
         # These models also don't support temperature
         kwargs.pop("temperature", None)
 
-    client = AsyncOpenAI(**client_kwargs)
+    client = AsyncOpenAI(**client_kwargs, timeout=90.0)
     response = await client.chat.completions.create(
         model=config.model_id,
         messages=messages,
@@ -613,7 +639,7 @@ async def _anthropic_completion(
     """Handle Anthropic models (different API format)."""
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(api_key=api_key)
+    client = AsyncAnthropic(api_key=api_key, timeout=90.0)
 
     # Extract system message (Anthropic uses a separate `system` param)
     system_text = ""
@@ -654,7 +680,7 @@ async def _anthropic_stream(
     """Stream text deltas from Anthropic models."""
     from anthropic import AsyncAnthropic
 
-    client = AsyncAnthropic(api_key=api_key)
+    client = AsyncAnthropic(api_key=api_key, timeout=90.0)
 
     system_text = ""
     filtered_messages = []
@@ -699,7 +725,7 @@ async def _openai_compatible_stream(
             kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
         kwargs.pop("temperature", None)
 
-    client = AsyncOpenAI(**client_kwargs)
+    client = AsyncOpenAI(**client_kwargs, timeout=90.0)
     stream = await client.chat.completions.create(
         model=config.model_id,
         messages=messages,

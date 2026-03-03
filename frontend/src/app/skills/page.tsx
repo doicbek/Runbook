@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -933,8 +934,9 @@ function OntologyTab({ filterType }: { filterType: string }) {
 // ── Main Page ───────────────────────────────────────────────────────────
 
 export default function SkillsPage() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"skills" | "ontology">("skills");
-  const [filterType, setFilterType] = useState<string>("");
+  const [filterType, setFilterType] = useState<string>(searchParams.get("agent_type") || "");
 
   return (
     <div className="min-h-screen bg-background">

@@ -97,10 +97,42 @@ async def get_agent_async(agent_type: str, db: AsyncSession) -> BaseAgent:
     return MockAgent(agent_type=agent_type)
 
 
+_BLOCKED_BUILTINS = {
+    "__import__", "exec", "eval", "compile", "open", "globals", "locals",
+    "breakpoint", "exit", "quit", "input", "memoryview", "help",
+}
+
+_SAFE_BUILTINS = (
+    {
+        k: v for k, v in __builtins__.items()  # type: ignore
+        if k not in _BLOCKED_BUILTINS
+    } if isinstance(__builtins__, dict) else {
+        k: getattr(__builtins__, k) for k in dir(__builtins__)
+        if k not in _BLOCKED_BUILTINS
+    }
+)
+
+_ALLOWED_IMPORTS = {
+    "asyncio", "logging", "json", "re", "math", "datetime", "typing",
+    "collections", "dataclasses", "abc", "functools", "itertools", "pathlib",
+    "uuid", "hashlib", "base64", "textwrap", "copy", "enum", "time", "os.path",
+}
+
+
+def _safe_import(name, *args, **kwargs):
+    top = name.split(".")[0]
+    if top not in _ALLOWED_IMPORTS and name not in _ALLOWED_IMPORTS:
+        raise ImportError(f"Import of '{name}' is not allowed in custom agents")
+    return __builtins__.__import__(name, *args, **kwargs) if hasattr(__builtins__, '__import__') else __import__(name, *args, **kwargs)
+
+
 def _load_dynamic_agent(defn: Any) -> BaseAgent:
     """exec() the agent code and return an instantiated agent."""
     from app.services.llm_client import chat_completion, get_default_model_for_agent
     import asyncio
+
+    restricted_builtins = dict(_SAFE_BUILTINS)
+    restricted_builtins["__import__"] = _safe_import
 
     namespace: dict[str, Any] = {
         "BaseAgent": BaseAgent,
@@ -109,7 +141,7 @@ def _load_dynamic_agent(defn: Any) -> BaseAgent:
         "asyncio": asyncio,
         "logging": logging,
         "Any": Any,
-        "__builtins__": __builtins__,
+        "__builtins__": restricted_builtins,
     }
 
     try:

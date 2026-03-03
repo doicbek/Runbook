@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Artifact, ArtifactVersion
 from app.schemas.task import ArtifactResponse, ArtifactVersionResponse
+from app.services.code_runner import ARTIFACTS_DIR
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
@@ -33,7 +34,11 @@ async def get_artifact_content(artifact_id: str, db: AsyncSession = Depends(get_
     if not artifact.storage_path:
         raise HTTPException(status_code=404, detail="Artifact has no stored file")
 
-    file_path = Path(artifact.storage_path)
+    file_path = Path(artifact.storage_path).resolve()
+    artifacts_root = ARTIFACTS_DIR.resolve()
+    if not str(file_path).startswith(str(artifacts_root)):
+        raise HTTPException(status_code=403, detail="Access denied: path outside artifacts directory")
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Artifact file not found on disk")
 
@@ -77,7 +82,11 @@ async def get_artifact_version_content(
     if not ver:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    file_path = Path(ver.storage_path)
+    file_path = Path(ver.storage_path).resolve()
+    artifacts_root = ARTIFACTS_DIR.resolve()
+    if not str(file_path).startswith(str(artifacts_root)):
+        raise HTTPException(status_code=403, detail="Access denied: path outside artifacts directory")
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Version file not found on disk")
 
