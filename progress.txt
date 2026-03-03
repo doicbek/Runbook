@@ -847,3 +847,36 @@
   - Cast to Float needed for proper division result in SQLite
   - Analytics router pattern: separate from entity routers, prefix `/analytics`, use Query params for filters
 ---
+
+## 2026-03-02 - US-039
+- Added `forked_from_id` column (String(36), nullable) to Action model
+- Added idempotent ALTER TABLE migration in `init_db()`
+- Added `forked_from_id` field to `ActionResponse` and `ActionListResponse` schemas
+- Added `POST /actions/{id}/fork` endpoint: creates new action with same root_prompt, title = "{original} (fork)", all tasks copied with new UUIDs, dependencies remapped, status set to pending, no auto-run
+- Added `GET /actions/{id}/forks` endpoint: lists all actions forked from a given action with task counts
+- Updated `list_actions` to include `forked_from_id` in response
+- Files changed: `backend/app/models/action.py`, `backend/app/database.py`, `backend/app/schemas/action.py`, `backend/app/routers/actions.py`
+- **Learnings for future iterations:**
+  - Fork pattern: build old->new ID mapping first, then iterate tasks remapping dependencies via the map
+  - Use `uuid_mod` alias when importing uuid inside a function to avoid conflict with the module-level uuid usage in models
+  - `getattr(action, "forked_from_id", None)` is safe for backwards compat when column may not exist on old rows loaded before migration
+---
+
+## 2026-03-02 - US-040
+- What was implemented: Fork button and fork indicator in frontend UI
+  - Frontend API client: forkAction(id) and listForks(id) functions in actions.ts
+  - React Query hooks: useForkAction and useForks in use-actions.ts
+  - Workspace header: Fork button visible on completed/failed actions, navigates to forked action
+  - Workspace header: Forks count badge with dropdown listing forks with status and links
+  - Sidebar: small branch/fork icon shown on forked actions (those with forked_from_id set)
+  - Types: forked_from_id field added to Action and ActionListItem interfaces
+- Files changed:
+  - frontend/src/lib/api/actions.ts (added forkAction, listForks)
+  - frontend/src/hooks/use-actions.ts (added useForkAction, useForks)
+  - frontend/src/types/index.ts (added forked_from_id to Action, ActionListItem)
+  - frontend/src/components/workspace/workspace-header.tsx (fork button, forks dropdown)
+  - frontend/src/components/app-sidebar.tsx (branch icon on forked actions)
+- **Learnings for future iterations:**
+  - SVG elements in React/TypeScript don't accept `title` as a direct prop — use a `<title>` child element or remove it to avoid TS errors
+  - Most of the fork UI was already scaffolded alongside the backend endpoint (US-039) but not committed — check for uncommitted related work before starting a story
+---
