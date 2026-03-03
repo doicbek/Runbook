@@ -916,3 +916,19 @@
   - Text type detection uses mime_type prefix matching (text/, application/json)
   - `file.read_text(errors="replace")` is safer than strict mode for potentially mixed-encoding artifacts
 ---
+
+## 2026-03-02 - US-043
+- Added artifact version selector and diff view to frontend TaskCard
+- New types: `ArtifactVersion`, `ArtifactDiffResponse` in `frontend/src/types/index.ts`
+- New API functions in `frontend/src/lib/api/tasks.ts`: `getArtifact`, `listArtifactVersions`, `getArtifactVersionContentUrl`, `getArtifactDiff`
+- Enhanced `ArtifactDisplay` component: fetches artifact metadata, shows version badge when `current_version > 1`, version dropdown with timestamps, version-specific content loading
+- New `ArtifactDiffView` component: renders unified diff with green additions / red deletions / blue hunk headers in a pre block
+- Compare button on text artifacts triggers diff between latest two versions
+- `ArtifactImage` resets loading state on URL change (when switching versions)
+- Files changed: `frontend/src/types/index.ts`, `frontend/src/lib/api/tasks.ts`, `frontend/src/components/workspace/task-card.tsx`
+- **Learnings for future iterations:**
+  - `ArtifactDisplay` previously only received `artifactId` — to get metadata like `current_version`, you must fetch via `GET /artifacts/{id}`
+  - Backend already had all version endpoints (list, serve content, diff) from US-042; frontend just needed to wire them up
+  - Outside-click close for dropdowns: use `useRef` + `document.addEventListener("mousedown", handler)` with cleanup in effect return
+  - The `ArtifactImage` component needs to reset `isImage`/`loaded` state when URL changes (version switch), otherwise it stays in the old state
+---
