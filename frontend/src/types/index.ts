@@ -75,6 +75,7 @@ export interface Artifact {
   mime_type: string | null;
   storage_path: string | null;
   size_bytes: number | null;
+  current_version: number;
   created_at: string;
 }
 

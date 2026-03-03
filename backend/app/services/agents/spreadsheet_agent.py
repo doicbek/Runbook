@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models import Artifact, TaskOutput, Task
 from app.services.agents.base import BaseAgent
+from app.services.artifact_versioning import version_existing_artifacts, create_versioned_artifact
 from app.services.code_runner import run_code
 from app.services.llm_client import chat_completion, get_default_model_for_agent
 
@@ -99,13 +100,12 @@ class SpreadsheetAgent(BaseAgent):
         # ── 5. Save artifacts ─────────────────────────────────────────────────
         artifact_urls: list[dict] = []
         async with async_session() as db:
-            old = await db.execute(select(Artifact).where(Artifact.task_id == task_id))
-            for a in old.scalars().all():
-                await db.delete(a)
-            await db.flush()
+            # Version existing artifacts before creating new ones
+            await version_existing_artifacts(db, task_id)
 
             for f in files:
-                artifact = Artifact(
+                artifact = await create_versioned_artifact(
+                    db,
                     task_id=task_id,
                     action_id=action_id,
                     type=f["type"],
@@ -113,9 +113,6 @@ class SpreadsheetAgent(BaseAgent):
                     storage_path=f["path"],
                     size_bytes=f["size"],
                 )
-                db.add(artifact)
-                await db.flush()
-                await db.refresh(artifact)
                 url = f"http://localhost:8001/artifacts/{artifact.id}/content"
                 artifact_urls.append({
                     "id": artifact.id,

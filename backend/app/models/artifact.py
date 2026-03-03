@@ -17,6 +17,7 @@ class Artifact(Base):
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     task: Mapped["Task"] = relationship("Task", back_populates="artifacts")  # noqa: F821

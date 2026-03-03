@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from app.database import get_db
-from app.models import Action, Task, AgentIteration, TaskOutput, Log, Artifact
+from app.models import Action, Task, AgentIteration, TaskOutput, Log, Artifact, ArtifactVersion
 from app.schemas.action import ActionCreate, ActionListResponse, ActionResponse, ActionUpdate, PaginatedActionsResponse
 from app.schemas.task import TaskResponse
 from app.services.event_bus import event_bus
@@ -242,11 +242,26 @@ async def delete_action(action_id: str, db: AsyncSession = Depends(get_db)):
                 pass
         event_bus.clear_history(aid)
 
-    # Collect artifact storage paths for file cleanup
+    # Collect artifact IDs and storage paths for file cleanup
     artifact_result = await db.execute(
-        select(Artifact.storage_path).where(Artifact.action_id.in_(action_ids_to_delete))
+        select(Artifact.id, Artifact.storage_path).where(Artifact.action_id.in_(action_ids_to_delete))
     )
-    artifact_paths = [p for p in artifact_result.scalars().all() if p]
+    artifact_rows = artifact_result.all()
+    artifact_ids = [r[0] for r in artifact_rows]
+    artifact_paths = [r[1] for r in artifact_rows if r[1]]
+
+    # Collect ArtifactVersion storage paths for cleanup
+    version_paths: list[str] = []
+    if artifact_ids:
+        version_result = await db.execute(
+            select(ArtifactVersion.storage_path).where(ArtifactVersion.artifact_id.in_(artifact_ids))
+        )
+        version_paths = [p for p in version_result.scalars().all() if p]
+
+        # Delete ArtifactVersion rows
+        await db.execute(
+            delete(ArtifactVersion).where(ArtifactVersion.artifact_id.in_(artifact_ids))
+        )
 
     # Delete in dependency order (children before parents)
     for aid in reversed(action_ids_to_delete):
@@ -270,7 +285,7 @@ async def delete_action(action_id: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # Clean up artifact files on disk (after DB commit, swallow errors)
-    for path in artifact_paths:
+    for path in artifact_paths + version_paths:
         try:
             os.unlink(path)
         except OSError:

@@ -55,6 +55,7 @@ class ArtifactResponse(BaseModel):
     mime_type: str | None = None
     storage_path: str | None = None
     size_bytes: int | None = None
+    current_version: int = 1
     created_at: datetime
 
     model_config = {"from_attributes": True}

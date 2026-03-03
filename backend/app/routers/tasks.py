@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Action, AgentIteration, Artifact, Log, Task, TaskOutput
 from app.schemas.task import AgentIterationResponse, ArtifactResponse, LogResponse, TaskCreate, TaskResponse, TaskUpdate
+from app.services.artifact_versioning import version_existing_artifacts, create_versioned_artifact
 from app.services.event_bus import event_bus
 from app.services.pause_manager import pause_manager
 
@@ -311,18 +312,15 @@ async def run_task_code(
         log_callback=log_callback,
     )
 
-    # Delete old artifacts for this task (from previous runs)
-    old_artifacts = await db.execute(
-        select(Artifact).where(Artifact.task_id == task_id)
-    )
-    for old in old_artifacts.scalars().all():
-        await db.delete(old)
+    # Version existing artifacts before creating new ones
+    await version_existing_artifacts(db, task_id)
     await db.commit()
 
     # Create artifact records for generated files
     artifacts = []
     for f in result["files"]:
-        artifact = Artifact(
+        artifact = await create_versioned_artifact(
+            db,
             task_id=task_id,
             action_id=action_id,
             type=f["type"],
@@ -330,7 +328,6 @@ async def run_task_code(
             storage_path=f["path"],
             size_bytes=f["size"],
         )
-        db.add(artifact)
         artifacts.append(artifact)
 
     await db.commit()

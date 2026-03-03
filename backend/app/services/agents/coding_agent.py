@@ -18,6 +18,7 @@ from app.database import async_session
 from app.models.agent_iteration import AgentIteration
 from app.models.artifact import Artifact
 from app.models.tool_usage import ToolUsage
+from app.services.artifact_versioning import version_existing_artifacts, create_versioned_artifact
 from app.services.agents.base import BaseAgent
 from app.services.agents.coding_tools import (
     bash_run,
@@ -1009,18 +1010,19 @@ class CodingAgent(BaseAgent):
         diff_path.write_text(diff_text or "# No changes detected", encoding="utf-8")
         diff_size = diff_path.stat().st_size
 
-        # Create Artifact record
+        # Create Artifact record with versioning
         async with async_session() as db:
-            artifact = Artifact(
-                id=artifact_id,
+            await version_existing_artifacts(db, task_id)
+            await create_versioned_artifact(
+                db,
                 task_id=task_id,
                 action_id=action_id,
                 type="file",
                 mime_type="text/x-diff",
                 storage_path=str(diff_path),
                 size_bytes=diff_size,
+                artifact_id=artifact_id,
             )
-            db.add(artifact)
             await db.commit()
 
         if log_callback:

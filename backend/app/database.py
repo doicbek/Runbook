@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    from app.models import action, action_schedule, action_template, agent_definition, agent_iteration, agent_memory_model, agent_skill, skill_relation, artifact, llm_usage, log, planner_config, task, task_output, tool_usage  # noqa: F401
+    from app.models import action, action_schedule, action_template, agent_definition, agent_iteration, agent_memory_model, agent_skill, skill_relation, artifact, artifact_version, llm_usage, log, planner_config, task, task_output, tool_usage  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -46,6 +46,8 @@ async def init_db():
             "ALTER TABLE tasks ADD COLUMN timeout_seconds INTEGER",
             # Action forking
             "ALTER TABLE actions ADD COLUMN forked_from_id TEXT",
+            # Artifact versioning
+            "ALTER TABLE artifacts ADD COLUMN current_version INTEGER DEFAULT 1",
         ]:
             try:
                 await conn.execute(text(stmt))

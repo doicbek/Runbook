@@ -10,6 +10,7 @@ from app.database import async_session
 from app.models import Artifact, TaskOutput
 from app.models.tool_usage import ToolUsage
 from app.services.agents.base import BaseAgent
+from app.services.artifact_versioning import version_existing_artifacts, create_versioned_artifact
 from app.services.code_runner import run_code
 from app.services.llm_client import chat_completion, get_default_model_for_agent
 
@@ -127,16 +128,12 @@ class CodeExecutionAgent(BaseAgent):
         # DB session which deadlocks on the SQLite write lock held by this transaction.
         artifact_urls = []
         async with async_session() as db:
-            # Clean old artifacts for this task
-            old_result = await db.execute(
-                select(Artifact).where(Artifact.task_id == task_id)
-            )
-            for old in old_result.scalars().all():
-                await db.delete(old)
-            await db.flush()
+            # Version existing artifacts before creating new ones
+            await version_existing_artifacts(db, task_id)
 
             for f in files:
-                artifact = Artifact(
+                artifact = await create_versioned_artifact(
+                    db,
                     task_id=task_id,
                     action_id=action_id,
                     type=f["type"],
@@ -144,9 +141,6 @@ class CodeExecutionAgent(BaseAgent):
                     storage_path=f["path"],
                     size_bytes=f["size"],
                 )
-                db.add(artifact)
-                await db.flush()
-                await db.refresh(artifact)
 
                 artifact_urls.append({
                     "id": artifact.id,
